@@ -1,0 +1,24 @@
+version: '3'
+
+tasks:
+  default:
+    desc: Builds the project
+    cmds:
+      - cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+      - cmake --build build --parallel
+
+  clean:
+    desc: Cleans the project
+    cmds:
+      - rm -rf build
+
+  release:
+    desc: Builds the project in release mode
+    cmds:
+      - cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - cmake --build build --parallel
+
+  format:
+    desc: Formats the project
+    cmds:
+      - find . -path ./build -prune -o \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' -o -name '*.c' \) -print | xargs clang-format -i -style=file
