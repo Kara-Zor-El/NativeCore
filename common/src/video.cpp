@@ -86,7 +86,8 @@ void VideoManager::recreateTexture() {
 
   SDL_GPUTextureCreateInfo tex_info = {};
   tex_info.type = SDL_GPU_TEXTURETYPE_2D;
-  // Framebuffer is 0xAARRGGBB; in little-endian memory that is B,G,R,A = BGRA.
+  // Framebuffer is 0xAARRGGBB
+  // in little-endian memory that is B,G,R,A = BGRA
   tex_info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
   tex_info.width = static_cast<uint32_t>(game_width_);
   tex_info.height = static_cast<uint32_t>(game_height_);

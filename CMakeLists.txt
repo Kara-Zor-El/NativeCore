@@ -67,6 +67,6 @@ target_include_directories(imgui PUBLIC
 target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
 add_subdirectory(common)
-# add_subdirectory(cores/gb)
+add_subdirectory(cores/gb)
 add_subdirectory(runtime)
 add_subdirectory(cli)
