@@ -15,8 +15,11 @@ bool VideoManager::init(const std::string &title, int game_width,
 
   window_ = SDL_CreateWindow(title.c_str(), game_width_ * scale_,
                              game_height_ * scale_, SDL_WINDOW_RESIZABLE);
-  if (!window_)
+  if (!window_) {
+    const char *err = SDL_GetError();
+    SDL_SetError("SDL_CreateWindow: %s", (err && *err) ? err : "unknown");
     return false;
+  }
 
   gpu_device_ = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV |
                                         SDL_GPU_SHADERFORMAT_MSL |
@@ -24,18 +27,33 @@ bool VideoManager::init(const std::string &title, int game_width,
                                     true, nullptr);
 
   if (!gpu_device_) {
+    const char *err = SDL_GetError();
     SDL_DestroyWindow(window_);
     window_ = nullptr;
+    SDL_SetError("SDL_CreateGPUDevice: %s", (err && *err) ? err : "unknown");
     return false;
   }
 
   if (!SDL_ClaimWindowForGPUDevice(gpu_device_, window_)) {
+    const char *err = SDL_GetError();
     SDL_DestroyGPUDevice(gpu_device_);
     SDL_DestroyWindow(window_);
     gpu_device_ = nullptr;
     window_ = nullptr;
+    SDL_SetError("SDL_ClaimWindowForGPUDevice: %s",
+                 (err && *err) ? err : "unknown");
     return false;
   }
+
+  recreateTexture();
+  if (!game_texture_ || !transfer_buffer_) {
+    const char *err = SDL_GetError();
+    shutdown();
+    SDL_SetError("Failed to create game texture: %s",
+                 (err && *err) ? err : "unknown");
+    return false;
+  }
+  return true;
 }
 
 void VideoManager::shutdown() {
@@ -123,6 +141,8 @@ void VideoManager::recordDrawToSwapchain(SDL_GPUCommandBuffer *cmd,
                                          uint32_t swapchain_w,
                                          uint32_t swapchain_h) {
   if (!cmd || !swapchain_tex)
+    return;
+  if (!game_texture_)
     return;
 
   SDL_GPUBlitInfo blit = {};
