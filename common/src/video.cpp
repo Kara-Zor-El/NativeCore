@@ -146,16 +146,49 @@ void VideoManager::recordDrawToSwapchain(SDL_GPUCommandBuffer *cmd,
   if (!game_texture_)
     return;
 
+  uint32_t dest_x = 0;
+  uint32_t dest_y = 0;
+  uint32_t dest_w = swapchain_w;
+  uint32_t dest_h = swapchain_h;
+
+  if (maintain_aspect_ratio_ && swapchain_w > 0 && swapchain_h > 0 &&
+      game_width_ > 0 && game_height_ > 0) {
+    // Scale to fit while preserving aspect ratio
+    const double scale_w = static_cast<double>(swapchain_w) / game_width_;
+    const double scale_h = static_cast<double>(swapchain_h) / game_height_;
+    const double scale = (scale_w < scale_h) ? scale_w : scale_h;
+    dest_w = static_cast<uint32_t>(game_width_ * scale + 0.5);
+    dest_h = static_cast<uint32_t>(game_height_ * scale + 0.5);
+    if (dest_w > swapchain_w)
+      dest_w = swapchain_w;
+    if (dest_h > swapchain_h)
+      dest_h = swapchain_h;
+    dest_x = (swapchain_w - dest_w) / 2;
+    dest_y = (swapchain_h - dest_h) / 2;
+
+    // Clear entire swapchain to black first
+    SDL_GPUColorTargetInfo color_info = {};
+    color_info.texture = swapchain_tex;
+    color_info.load_op = SDL_GPU_LOADOP_CLEAR;
+    color_info.store_op = SDL_GPU_STOREOP_STORE;
+    color_info.clear_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    auto *pass = SDL_BeginGPURenderPass(cmd, &color_info, 1, nullptr);
+    SDL_EndGPURenderPass(pass);
+  }
+
   SDL_GPUBlitInfo blit = {};
   blit.source.texture = game_texture_;
   blit.source.w = static_cast<uint32_t>(game_width_);
   blit.source.h = static_cast<uint32_t>(game_height_);
   blit.destination.texture = swapchain_tex;
-  blit.destination.w = swapchain_w;
-  blit.destination.h = swapchain_h;
+  blit.destination.x = dest_x;
+  blit.destination.y = dest_y;
+  blit.destination.w = dest_w;
+  blit.destination.h = dest_h;
   blit.filter = (scale_mode_ == ScaleMode::Nearest) ? SDL_GPU_FILTER_NEAREST
                                                     : SDL_GPU_FILTER_LINEAR;
-  blit.load_op = SDL_GPU_LOADOP_CLEAR;
+  blit.load_op = maintain_aspect_ratio_ ? SDL_GPU_LOADOP_LOAD
+                                         : SDL_GPU_LOADOP_CLEAR;
   blit.clear_color = {0.0f, 0.0f, 0.0f, 1.0f};
 
   SDL_BlitGPUTexture(cmd, &blit);

@@ -30,6 +30,9 @@ public:
   std::string scaleMode() const;
   void setScaleMode(const std::string &mode);
 
+  bool maintainAspectRatio() const;
+  void setMaintainAspectRatio(bool maintain);
+
   bool fullscreen() const;
   void setFullscreen(bool fullscreen);
 

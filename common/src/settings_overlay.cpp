@@ -294,6 +294,15 @@ void SettingsOverlay::renderVideoPanel(VideoManager &video,
     video.setScaleMode(static_cast<ScaleMode>(current));
     config.setScaleMode(current == 0 ? "nearest" : "bilinear");
   }
+
+  bool maintain_aspect = video.maintainAspectRatio();
+  if (ImGui::Checkbox("Maintain aspect ratio", &maintain_aspect)) {
+    video.setMaintainAspectRatio(maintain_aspect);
+    config.setMaintainAspectRatio(maintain_aspect);
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("Keep original aspect ratio when scaling");
+  }
 }
 
 void SettingsOverlay::renderPerformancePanel(FrameLimiter &limiter,

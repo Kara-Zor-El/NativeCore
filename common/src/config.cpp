@@ -64,6 +64,7 @@ void ConfigManager::setDefaults() {
   config_["video"]["scale"] = 3;
   config_["video"]["fullscreen"] = false;
   config_["video"]["scale_mode"] = "nearest";
+  config_["video"]["maintain_aspect_ratio"] = false;
   config_["input"]["bindings"] = YAML::Node(YAML::NodeType::Map);
   config_["performance"]["fps_limit"] = 60.0;
   config_["performance"]["uncapped"] = false;
@@ -154,6 +155,15 @@ std::string ConfigManager::scaleMode() const {
 
 void ConfigManager::setScaleMode(const std::string &mode) {
   config_["video"]["scale_mode"] = mode;
+  autoSave();
+}
+
+bool ConfigManager::maintainAspectRatio() const {
+  return getValue(config_["video"]["maintain_aspect_ratio"], false);
+}
+
+void ConfigManager::setMaintainAspectRatio(bool maintain) {
+  config_["video"]["maintain_aspect_ratio"] = maintain;
   autoSave();
 }
 

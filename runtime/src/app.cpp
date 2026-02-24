@@ -45,6 +45,7 @@ std::string App::init(std::unique_ptr<Core> core,
   auto mode_str = config_.scaleMode();
   video_.setScaleMode(mode_str == "bilinear" ? ScaleMode::Bilinear
                                              : ScaleMode::Nearest);
+  video_.setMaintainAspectRatio(config_.maintainAspectRatio());
 
   // Initialize audio
   if (!audio_.init(sys.audio_sample_rate))
