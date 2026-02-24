@@ -66,7 +66,8 @@ private:
   std::array<uint8_t, 160> oam_{};
   std::array<uint32_t, SCREEN_W * SCREEN_H> framebuffer_{};
 
-  // TODO: offer other color palettes via a settings hook (and allow custom palettes)
+  // TODO: offer other color palettes via a settings hook (and allow custom
+  // palettes)
   static constexpr uint32_t PALETTE[4] = {
       0xFFE0F8D0, // lightest (white-green)
       0xFF88C070, // light
