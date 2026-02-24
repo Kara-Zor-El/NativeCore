@@ -18,7 +18,8 @@ public:
   App();
   ~App();
 
-  bool init(std::unique_ptr<Core> core, const std::string &config_path = "");
+  std::string init(std::unique_ptr<Core> core,
+                   const std::string &config_path = "");
   void run();
   void shutdown();
 

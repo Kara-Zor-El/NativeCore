@@ -3,6 +3,7 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_filesystem.h>
+#include <imgui.h>
 
 #include <cstdlib>
 #include <fstream>
@@ -13,13 +14,14 @@ namespace nativecore::runtime {
 App::App() = default;
 App::~App() { shutdown(); }
 
-bool App::init(std::unique_ptr<Core> core, const std::string &config_path) {
+std::string App::init(std::unique_ptr<Core> core,
+                      const std::string &config_path) {
   core_ = std::move(core);
   if (!core_)
-    return false;
+    return std::string("Core is null");
 
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD))
-    return false;
+    return std::string("Failed to initialize SDL: ") + SDL_GetError();
 
   const auto &sys = core_->systemInfo();
 
@@ -35,7 +37,9 @@ bool App::init(std::unique_ptr<Core> core, const std::string &config_path) {
   std::string title = "recomp - " + sys.name;
   if (!video_.init(title, sys.screen_width, sys.screen_height,
                    config_.windowScale())) {
-    return false;
+    const char *err = SDL_GetError();
+    return std::string("Failed to initialize video: ") +
+           (err && *err ? err : "unknown");
   }
   video_.setFullscreen(config_.fullscreen());
   auto mode_str = config_.scaleMode();
@@ -44,7 +48,7 @@ bool App::init(std::unique_ptr<Core> core, const std::string &config_path) {
 
   // Initialize audio
   if (!audio_.init(sys.audio_sample_rate))
-    return false;
+    return std::string("Failed to initialize audio: ") + SDL_GetError();
   audio_.setMasterVolume(config_.masterVolume());
 
   // Set up for Game Boy
@@ -69,7 +73,7 @@ bool App::init(std::unique_ptr<Core> core, const std::string &config_path) {
   overlay_.init(video_);
 
   running_ = true;
-  return true;
+  return std::string();
 }
 
 void App::run() {
@@ -102,17 +106,26 @@ void App::handleEvents() {
       running_ = false;
       return;
     }
-    if (event.type == SDL_EVENT_KEY_DOWN ||
-        event.key.scancode == SDL_SCANCODE_F1 && !event.key.repeat) {
-      overlay_.toggle();
-    }
 
-    if (event.type == SDL_EVENT_KEY_DOWN ||
-        event.key.scancode == SDL_SCANCODE_F11 && !event.key.repeat) {
-      video_.toggleFullscreen();
+    if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
+      if (event.key.scancode == SDL_SCANCODE_F1) {
+        overlay_.toggle();
+        continue;
+      }
+      if (event.key.scancode == SDL_SCANCODE_F11) {
+        video_.toggleFullscreen();
+        continue;
+      }
     }
 
     overlay_.processEvent(event);
+
+    const bool want_keyboard =
+        overlay_.isOpen() && ImGui::GetIO().WantCaptureKeyboard;
+
+    if (!want_keyboard) {
+      input_.processEvent(event);
+    }
   }
 
   if (core_) {
