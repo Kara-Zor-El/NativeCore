@@ -37,6 +37,20 @@ bool ConfigManager::load(const std::string &path) {
   }
 }
 
+bool ConfigManager::save(const std::string &path) const {
+  try {
+    std::ofstream file(path);
+    if (!file.is_open())
+      return false;
+    YAML::Emitter out;
+    out << config_;
+    file << out.c_str();
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
 bool ConfigManager::save() const {
   if (file_path_.empty())
     return false;
