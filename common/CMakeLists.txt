@@ -9,6 +9,8 @@ add_library(nativecore_common STATIC
   src/recompiler.cpp
   src/core.cpp
   src/settings_overlay.cpp
+  src/themes/theme_default.cpp
+  src/themes/theme_game_boy.cpp
   src/video.cpp
 )
 

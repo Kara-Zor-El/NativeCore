@@ -1,12 +1,15 @@
 #include "nativecore/settings_overlay.h"
 #include "nativecore/core.h"
+#include "nativecore/themes.h"
 
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlgpu3.h>
 
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <cstdio>
+#include <string>
 
 namespace nativecore {
 
@@ -21,12 +24,14 @@ bool SettingsOverlay::init(VideoManager &video) {
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
-  ImGui::StyleColorsDark();
+  applyThemeForCore(std::string("Default"));
 
   ImGui_ImplSDL3_InitForOther(video.window());
   ImGui_ImplSDLGPU3_InitInfo init_info = {};
+  init_info.Device = video.gpuDevice();
   init_info.ColorTargetFormat =
       SDL_GetGPUSwapchainTextureFormat(video.gpuDevice(), video.window());
+  init_info.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
   ImGui_ImplSDLGPU3_Init(&init_info);
 
   initialized_ = true;
@@ -50,20 +55,64 @@ void SettingsOverlay::processEvent(const SDL_Event &event) {
   }
 }
 
+void SettingsOverlay::applyThemeForCore(const std::string &core_name) {
+  ImGui::GetStyle() = ImGuiStyle();
+  if (core_name == "Game Boy") {
+    themes::apply_game_boy();
+  } else {
+    themes::apply_default();
+  }
+}
+
 void SettingsOverlay::render(AudioManager &audio, InputManager &input,
                              VideoManager &video, FrameLimiter &limiter,
                              ConfigManager &config, Core *core) {
   if (!initialized_ || !open_)
     return;
 
+  const float raw_scale = static_cast<float>(video.scale());
+  float effective_scale = 1.0f;
+  if (raw_scale <= 1.0f) {
+    effective_scale = 0.65f;
+  } else if (raw_scale <= 2.0f) {
+    effective_scale = 0.8f;
+  } else if (raw_scale <= 3.0f) {
+    effective_scale = 1.25f;
+  } else {
+    effective_scale = 1.5f;
+  }
+
+  const std::string core_name = core ? core->systemInfo().name : "Default";
+  if (effective_scale != current_scale_ || core_name != core_name_) {
+    ImGui::GetStyle() = ImGuiStyle();
+    applyThemeForCore(core_name);
+    ImGui::GetStyle().ScaleAllSizes(effective_scale);
+    ImGui::GetIO().FontGlobalScale = effective_scale;
+    current_scale_ = effective_scale;
+    core_name_ = core_name;
+  }
+
   ImGui_ImplSDLGPU3_NewFrame();
   ImGui_ImplSDL3_NewFrame();
+
+  int pixel_w = 0, pixel_h = 0;
+  SDL_GetWindowSizeInPixels(video.window(), &pixel_w, &pixel_h);
+  if (pixel_w > 0 && pixel_h > 0) {
+    auto &io = ImGui::GetIO();
+    io.DisplaySize =
+        ImVec2(static_cast<float>(pixel_w), static_cast<float>(pixel_h));
+    io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+  }
+
   ImGui::NewFrame();
 
-  ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
-  ImGui::SetNextWindowSize(ImVec2(420, 500), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+  ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize, ImGuiCond_Always);
 
-  if (ImGui::Begin("Settings", &open_, ImGuiWindowFlags_NoCollapse)) {
+  auto flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+               ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar;
+
+  if (ImGui::Begin("Settings", &open_, flags)) {
     if (ImGui::BeginTabBar("SettingsTabs", ImGuiTabBarFlags_None)) {
       if (ImGui::BeginTabItem("Audio")) {
         renderAudioPanel(audio, config);
@@ -149,9 +198,80 @@ void SettingsOverlay::renderAudioPanel(AudioManager &audio,
   }
 }
 
+static const char *keyName(SDL_Scancode scancode) {
+  if (scancode == SDL_SCANCODE_UNKNOWN)
+    return "-";
+  const char *name = SDL_GetScancodeName(scancode);
+  return name && name[0] ? name : "-";
+}
+
+static const char *gamepadButtonName(SDL_GamepadButton button) {
+  if (button == SDL_GAMEPAD_BUTTON_INVALID)
+    return "-";
+  const char *name = SDL_GetGamepadStringForButton(button);
+  return name && name[0] ? name : "-";
+}
+
 void SettingsOverlay::renderInputPanel(InputManager &input,
                                        ConfigManager &config) {
-  // TODO: Implement input panel
+  const InputProfile &profile = input.currentProfile();
+  if (profile.bindings.empty()) {
+    ImGui::Text("No bindings for this profile.");
+    return;
+  }
+
+  if (input.isRebinding()) {
+    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
+                       "Press a key or gamepad button... (Esc to cancel)");
+    ImGui::Separator();
+  }
+
+  ImGui::Text("Player 0");
+  ImGui::Separator();
+
+  if (ImGui::BeginTable("InputBindings", 4,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+    ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed,
+                            80.0f * current_scale_);
+    ImGui::TableSetupColumn("Gamepad", ImGuiTableColumnFlags_WidthFixed,
+                            80.0f * current_scale_);
+    ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed,
+                            70.0f * current_scale_);
+    ImGui::TableHeadersRow();
+
+    for (size_t i = 0; i < profile.bindings.size(); i++) {
+      const InputBinding &b = profile.bindings[i];
+      if (b.controller_index != 0)
+        continue;
+
+      ImGui::TableNextRow();
+      ImGui::PushID(static_cast<int>(i));
+
+      ImGui::TableNextColumn();
+      ImGui::Text("%s", b.action_name.c_str());
+
+      ImGui::TableNextColumn();
+      ImGui::Text("%s", keyName(b.key));
+
+      ImGui::TableNextColumn();
+      ImGui::Text("%s", gamepadButtonName(b.pad_button));
+
+      ImGui::TableNextColumn();
+      bool is_rebinding_this =
+          input.isRebinding() && input.rebindAction() == b.action_name;
+      if (is_rebinding_this)
+        ImGui::BeginDisabled();
+      if (ImGui::Button("Rebind")) {
+        input.startRebind(b.action_name);
+      }
+      if (is_rebinding_this)
+        ImGui::EndDisabled();
+
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+  }
 }
 
 void SettingsOverlay::renderVideoPanel(VideoManager &video,
@@ -201,8 +321,12 @@ void SettingsOverlay::renderPerformancePanel(FrameLimiter &limiter,
   static int history_idx = 0;
   history[history_idx] = static_cast<float>(limiter.frameTimeMS());
   history_idx = (history_idx + 1) % 120;
-  ImGui::PlotLines("Frame Time (ms)", history, 120, history_idx, nullptr, 0.0f,
-                   33.3f, ImVec2(0, 60));
+  const float graph_height = std::max(60.0f, 80.0f * current_scale_);
+  ImGui::Text("Frame Time: ");
+  ImGui::PushID("frame_time_graph");
+  ImGui::PlotLines("", history, 120, history_idx, nullptr, 0.0f, 33.3f,
+                   ImVec2(-1.0f, graph_height));
+  ImGui::PopID();
 }
 
 } // namespace nativecore

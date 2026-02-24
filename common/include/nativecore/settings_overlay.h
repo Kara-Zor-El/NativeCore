@@ -7,6 +7,7 @@
 #include "nativecore/video.h"
 
 #include <SDL3/SDL.h>
+#include <string>
 
 namespace nativecore {
 class Core;
@@ -31,9 +32,12 @@ public:
 private:
   bool open_ = false;
   bool initialized_ = false;
+  float current_scale_ = 1.0f;
+  std::string core_name_;
 
   int active_tab_ = 0;
 
+  void applyThemeForCore(const std::string &core_name);
   void renderAudioPanel(AudioManager &audio, ConfigManager &config);
   void renderInputPanel(InputManager &input, ConfigManager &config);
   void renderVideoPanel(VideoManager &video, ConfigManager &config);
