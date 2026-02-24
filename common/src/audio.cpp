@@ -13,7 +13,7 @@ bool AudioManager::init(int sampleRate) {
   SDL_AudioSpec spec;
   spec.freq = sampleRate;
   spec.format = SDL_AUDIO_F32;
-  spec.channels = 1;
+  spec.channels = 2;
 
   stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec,
                                       nullptr, nullptr);
