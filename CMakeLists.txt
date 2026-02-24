@@ -16,18 +16,15 @@ find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
+find_package(SDL3 REQUIRED)
+message(STATUS "Found SDL3 ${SDL3_VERSION}")
+message(STATUS "Using SDLConfig.cmake in: ${SDL3_DIR}")
+
 list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(HandleLLVMOptions)
 include(AddLLVM)
 
 include(FetchContent)
-
-FetchContent_Declare(
-  SDL3
-  GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-  GIT_TAG        main
-  GIT_SHALLOW    TRUE
-)
 
 FetchContent_Declare(
   imgui
@@ -43,7 +40,7 @@ FetchContent_Declare(
   GIT_SHALLOW    TRUE
 )
 
-FetchContent_MakeAvailable(SDL3 yaml-cpp)
+FetchContent_MakeAvailable(yaml-cpp)
 
 # For Dear ImGui - build as a static library with SDL3+SDL_GPU backend
 FetchContent_GetProperties(imgui)

@@ -1,5 +1,3 @@
-find_package(Slang REQUIRED)
-
 add_library(nativecore_common STATIC
   src/audio.cpp
   src/config.cpp

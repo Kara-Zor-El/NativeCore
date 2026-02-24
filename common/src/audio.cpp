@@ -1,5 +1,6 @@
 #include "nativecore/audio.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace nativecore {

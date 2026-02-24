@@ -4,7 +4,7 @@ tasks:
   default:
     desc: Builds the project
     cmds:
-      - cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+      - cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug {{.CLI_ARGS}}
       - cmake --build build --parallel
 
   clean:
@@ -15,7 +15,7 @@ tasks:
   release:
     desc: Builds the project in release mode
     cmds:
-      - cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - cmake -S . -B build -DCMAKE_BUILD_TYPE=Release {{.CLI_ARGS}}
       - cmake --build build --parallel
 
   format:
