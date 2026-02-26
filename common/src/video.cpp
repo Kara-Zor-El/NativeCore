@@ -45,6 +45,8 @@ bool VideoManager::init(const std::string &title, int game_width,
     return false;
   }
 
+  setVsync(true);
+
   recreateTexture();
   if (!game_texture_ || !transfer_buffer_) {
     const char *err = SDL_GetError();
@@ -187,8 +189,8 @@ void VideoManager::recordDrawToSwapchain(SDL_GPUCommandBuffer *cmd,
   blit.destination.h = dest_h;
   blit.filter = (scale_mode_ == ScaleMode::Nearest) ? SDL_GPU_FILTER_NEAREST
                                                     : SDL_GPU_FILTER_LINEAR;
-  blit.load_op = maintain_aspect_ratio_ ? SDL_GPU_LOADOP_LOAD
-                                         : SDL_GPU_LOADOP_CLEAR;
+  blit.load_op =
+      maintain_aspect_ratio_ ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
   blit.clear_color = {0.0f, 0.0f, 0.0f, 1.0f};
 
   SDL_BlitGPUTexture(cmd, &blit);
@@ -230,5 +232,18 @@ void VideoManager::setScale(int scale) {
 }
 
 void VideoManager::setScaleMode(ScaleMode mode) { scale_mode_ = mode; }
+
+void VideoManager::setVsync(bool enable) {
+  if (!gpu_device_ || !window_)
+    return;
+  SDL_GPUPresentMode mode =
+      enable ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
+  if (!enable &&
+      !SDL_WindowSupportsGPUPresentMode(gpu_device_, window_, mode)) {
+    return;
+  }
+  SDL_SetGPUSwapchainParameters(gpu_device_, window_,
+                                SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode);
+}
 
 } // namespace nativecore

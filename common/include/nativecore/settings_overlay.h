@@ -41,7 +41,8 @@ private:
   void renderAudioPanel(AudioManager &audio, ConfigManager &config);
   void renderInputPanel(InputManager &input, ConfigManager &config);
   void renderVideoPanel(VideoManager &video, ConfigManager &config);
-  void renderPerformancePanel(FrameLimiter &limiter, ConfigManager &config);
+  void renderPerformancePanel(FrameLimiter &limiter, ConfigManager &config,
+                              VideoManager &video);
 };
 
 } // namespace nativecore

@@ -127,7 +127,8 @@ void SettingsOverlay::render(AudioManager &audio, InputManager &input,
         ImGui::EndTabItem();
       }
       if (ImGui::BeginTabItem("Performance")) {
-        renderPerformancePanel(limiter, config);
+        renderPerformancePanel(limiter, config, video);
+        ImGui::EndTabItem();
         ImGui::EndTabItem();
       }
       ImGui::EndTabBar();
@@ -306,7 +307,18 @@ void SettingsOverlay::renderVideoPanel(VideoManager &video,
 }
 
 void SettingsOverlay::renderPerformancePanel(FrameLimiter &limiter,
-                                             ConfigManager &config) {
+                                             ConfigManager &config,
+                                             VideoManager &video) {
+  bool vsync = config.vsync();
+  if (ImGui::Checkbox("VSync", &vsync)) {
+    config.setVsync(vsync);
+    video.setVsync(vsync);
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("Sync to display refresh. Disable to allow FPS above "
+                      "display rate (e.g. >120 on 120Hz), may cause tearing.");
+  }
+
   bool uncapped = limiter.isUncapped();
   if (ImGui::Checkbox("Uncapped FPS", &uncapped)) {
     limiter.setUncapped(uncapped);

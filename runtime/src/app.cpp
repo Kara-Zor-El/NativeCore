@@ -42,6 +42,7 @@ std::string App::init(std::unique_ptr<Core> core,
            (err && *err ? err : "unknown");
   }
   video_.setFullscreen(config_.fullscreen());
+  video_.setVsync(config_.vsync());
   auto mode_str = config_.scaleMode();
   video_.setScaleMode(mode_str == "bilinear" ? ScaleMode::Bilinear
                                              : ScaleMode::Nearest);

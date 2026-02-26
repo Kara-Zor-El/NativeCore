@@ -2,6 +2,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <fstream>
 
 namespace nativecore {
@@ -65,6 +66,7 @@ void ConfigManager::setDefaults() {
   config_["video"]["fullscreen"] = false;
   config_["video"]["scale_mode"] = "nearest";
   config_["video"]["maintain_aspect_ratio"] = false;
+  config_["video"]["vsync"] = true;
   config_["input"]["bindings"] = YAML::Node(YAML::NodeType::Map);
   config_["performance"]["fps_limit"] = 60.0;
   config_["performance"]["uncapped"] = false;
@@ -164,6 +166,15 @@ bool ConfigManager::maintainAspectRatio() const {
 
 void ConfigManager::setMaintainAspectRatio(bool maintain) {
   config_["video"]["maintain_aspect_ratio"] = maintain;
+  autoSave();
+}
+
+bool ConfigManager::vsync() const {
+  return getValue(config_["video"]["vsync"], true);
+}
+
+void ConfigManager::setVsync(bool enable) {
+  config_["video"]["vsync"] = enable;
   autoSave();
 }
 

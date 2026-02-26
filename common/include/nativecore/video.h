@@ -41,8 +41,13 @@ public:
   void setScaleMode(ScaleMode mode);
   ScaleMode scaleMode() const { return scale_mode_; }
 
-  void setMaintainAspectRatio(bool maintain) { maintain_aspect_ratio_ = maintain; }
+  void setMaintainAspectRatio(bool maintain) {
+    maintain_aspect_ratio_ = maintain;
+  }
   bool maintainAspectRatio() const { return maintain_aspect_ratio_; }
+
+  // Only takes effect if the backend supports immediate mode.
+  void setVsync(bool enable);
 
   SDL_Window *window() const { return window_; }
   SDL_GPUDevice *gpuDevice() const { return gpu_device_; }

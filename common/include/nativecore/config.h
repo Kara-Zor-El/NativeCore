@@ -36,6 +36,9 @@ public:
   bool fullscreen() const;
   void setFullscreen(bool fullscreen);
 
+  bool vsync() const;
+  void setVsync(bool enable);
+
   double fpsLimit() const;
   void setFpsLimit(double limit);
 
