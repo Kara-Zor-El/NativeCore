@@ -101,6 +101,12 @@ void apply_game_boy() {
   // table header
   colors[ImGuiCol_TableHeaderBg] = C(0.600f, 0.608f, 0.596f, 1.00f);
 
+  // Scrollbar
+  colors[ImGuiCol_ScrollbarBg] = shell_bg;
+  colors[ImGuiCol_ScrollbarGrab] = btn_base;
+  colors[ImGuiCol_ScrollbarGrabHovered] = btn_hover;
+  colors[ImGuiCol_ScrollbarGrabActive] = btn_active;
+
   style.ChildRounding = 4.0f;
   style.FrameRounding = 4.0f;
   style.PopupRounding = 4.0f;
