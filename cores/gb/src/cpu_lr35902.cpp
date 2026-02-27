@@ -1468,4 +1468,63 @@ void CPU::executeCB() {
   }
 }
 
+static void writeU16(std::vector<uint8_t> &out, uint16_t v) {
+  out.push_back(static_cast<uint8_t>(v));
+  out.push_back(static_cast<uint8_t>(v >> 8));
+}
+static bool readU16(const uint8_t *&p, const uint8_t *end, uint16_t &v) {
+  if (p + 2 > end)
+    return false;
+  v = static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+  p += 2;
+  return true;
+}
+static bool readU8(const uint8_t *&p, const uint8_t *end, uint8_t &v) {
+  if (p + 1 > end)
+    return false;
+  v = p[0];
+  p += 1;
+  return true;
+}
+static bool readBool(const uint8_t *&p, const uint8_t *end, bool &v) {
+  uint8_t b;
+  if (!readU8(p, end, b))
+    return false;
+  v = (b != 0);
+  return true;
+}
+
+void CPU::saveState(std::vector<uint8_t> &out) const {
+  out.push_back(a_);
+  out.push_back(f_);
+  out.push_back(b_);
+  out.push_back(c_);
+  out.push_back(d_);
+  out.push_back(e_);
+  out.push_back(h_);
+  out.push_back(l_);
+  writeU16(out, sp_);
+  writeU16(out, pc_);
+  out.push_back(ime_ ? 1 : 0);
+  out.push_back(ime_scheduled_ ? 1 : 0);
+  out.push_back(halted_ ? 1 : 0);
+  out.push_back(halt_bug_ ? 1 : 0);
+  out.push_back(stopped_ ? 1 : 0);
+}
+
+bool CPU::loadState(const uint8_t *&data, const uint8_t *end) {
+  if (!readU8(data, end, a_) || !readU8(data, end, f_) ||
+      !readU8(data, end, b_) || !readU8(data, end, c_) ||
+      !readU8(data, end, d_) || !readU8(data, end, e_) ||
+      !readU8(data, end, h_) || !readU8(data, end, l_))
+    return false;
+  if (!readU16(data, end, sp_) || !readU16(data, end, pc_))
+    return false;
+  if (!readBool(data, end, ime_) || !readBool(data, end, ime_scheduled_) ||
+      !readBool(data, end, halted_) || !readBool(data, end, halt_bug_) ||
+      !readBool(data, end, stopped_))
+    return false;
+  return true;
+}
+
 } // namespace nativecore

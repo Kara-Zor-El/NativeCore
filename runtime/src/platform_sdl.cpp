@@ -33,6 +33,15 @@ PlatformInfo getPlatformInfo() {
   return info;
 }
 
+std::string getDataDirectory() {
+  char *pref_path = SDL_GetPrefPath("NativeCore", "NativeCore");
+  if (!pref_path)
+    return ".";
+  std::string result(pref_path);
+  SDL_free(pref_path);
+  return result;
+}
+
 std::string getConfigDirectory(const std::string &app_name) {
   char *pref_path = SDL_GetPrefPath("NativeCore", app_name.c_str());
   if (!pref_path)

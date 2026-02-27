@@ -3,8 +3,39 @@
 
 #include <algorithm>
 #include <cstring>
+#include <vector>
 
 namespace nativecore {
+
+namespace {
+void writeU32(std::vector<uint8_t> &out, uint32_t v) {
+  out.push_back(static_cast<uint8_t>(v));
+  out.push_back(static_cast<uint8_t>(v >> 8));
+  out.push_back(static_cast<uint8_t>(v >> 16));
+  out.push_back(static_cast<uint8_t>(v >> 24));
+}
+bool readU8(const uint8_t *&p, const uint8_t *end, uint8_t &v) {
+  if (p + 1 > end)
+    return false;
+  v = *p++;
+  return true;
+}
+bool readU32(const uint8_t *&p, const uint8_t *end, uint32_t &v) {
+  if (p + 4 > end)
+    return false;
+  v = static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+      (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+  p += 4;
+  return true;
+}
+bool readBool(const uint8_t *&p, const uint8_t *end, bool &v) {
+  uint8_t b;
+  if (!readU8(p, end, b))
+    return false;
+  v = (b != 0);
+  return true;
+}
+} // namespace
 
 void PPU::reset() {
   lcdc_ = 0x91;
@@ -447,6 +478,78 @@ void PPU::renderSprites(const std::array<uint8_t, SCREEN_W> &bg_colors) {
       framebuffer_[ly_ * SCREEN_W + screen_x] = applyPalette(palette, color_id);
     }
   }
+}
+
+void PPU::saveState(std::vector<uint8_t> &out) const {
+  out.push_back(lcdc_);
+  out.push_back(stat_);
+  out.push_back(scy_);
+  out.push_back(scx_);
+  out.push_back(ly_);
+  out.push_back(lyc_);
+  out.push_back(bgp_);
+  out.push_back(obp0_);
+  out.push_back(obp1_);
+  out.push_back(wy_);
+  out.push_back(wx_);
+  out.push_back(static_cast<uint8_t>(mode_));
+  writeU32(out, static_cast<uint32_t>(mode_clock_));
+  writeU32(out, static_cast<uint32_t>(window_line_));
+  out.push_back(window_was_active_ ? 1 : 0);
+  out.push_back(frame_ready_ ? 1 : 0);
+  out.push_back(stat_line_ ? 1 : 0);
+  for (uint8_t x : vram_)
+    out.push_back(x);
+  for (uint8_t x : oam_)
+    out.push_back(x);
+  for (uint32_t x : framebuffer_) {
+    out.push_back(static_cast<uint8_t>(x));
+    out.push_back(static_cast<uint8_t>(x >> 8));
+    out.push_back(static_cast<uint8_t>(x >> 16));
+    out.push_back(static_cast<uint8_t>(x >> 24));
+  }
+}
+
+bool PPU::loadState(const uint8_t *&data, const uint8_t *end) {
+  if (!readU8(data, end, lcdc_) || !readU8(data, end, stat_) ||
+      !readU8(data, end, scy_) || !readU8(data, end, scx_) ||
+      !readU8(data, end, ly_) || !readU8(data, end, lyc_) ||
+      !readU8(data, end, bgp_) || !readU8(data, end, obp0_) ||
+      !readU8(data, end, obp1_) || !readU8(data, end, wy_) ||
+      !readU8(data, end, wx_))
+    return false;
+  uint8_t m;
+  if (!readU8(data, end, m))
+    return false;
+  mode_ = static_cast<Mode>(m);
+  uint32_t u32;
+  if (!readU32(data, end, u32))
+    return false;
+  mode_clock_ = static_cast<int>(u32);
+  if (!readU32(data, end, u32))
+    return false;
+  window_line_ = static_cast<int>(u32);
+  if (!readBool(data, end, window_was_active_) ||
+      !readBool(data, end, frame_ready_) || !readBool(data, end, stat_line_))
+    return false;
+  if (data + vram_.size() > end)
+    return false;
+  std::memcpy(vram_.data(), data, vram_.size());
+  data += vram_.size();
+  if (data + oam_.size() > end)
+    return false;
+  std::memcpy(oam_.data(), data, oam_.size());
+  data += oam_.size();
+  if (data + framebuffer_.size() * 4 > end)
+    return false;
+  for (size_t i = 0; i < framebuffer_.size(); i++) {
+    framebuffer_[i] = static_cast<uint32_t>(data[0]) |
+                      (static_cast<uint32_t>(data[1]) << 8) |
+                      (static_cast<uint32_t>(data[2]) << 16) |
+                      (static_cast<uint32_t>(data[3]) << 24);
+    data += 4;
+  }
+  return true;
 }
 
 } // namespace nativecore

@@ -102,6 +102,9 @@ public:
   void consumeSamples(size_t count);
   void clearBuffer();
 
+  void saveState(std::vector<uint8_t> &out) const;
+  bool loadState(const uint8_t *&data, const uint8_t *end);
+
 private:
   bool power_ = false;
   uint8_t frame_seq_step_ = 0;

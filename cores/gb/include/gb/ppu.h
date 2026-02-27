@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 namespace nativecore {
 
@@ -42,6 +43,9 @@ public:
   Mode mode() const { return mode_; }
 
   void oamDMAWrite(uint8_t index, uint8_t val);
+
+  void saveState(std::vector<uint8_t> &out) const;
+  bool loadState(const uint8_t *&data, const uint8_t *end);
 
 private:
   GBCore *bus_ = nullptr;

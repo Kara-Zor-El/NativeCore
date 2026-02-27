@@ -45,6 +45,9 @@ public:
   bool uncappedFps() const;
   void setUncappedFps(bool uncapped);
 
+  int maxSaveStates() const;
+  void setMaxSaveStates(int max);
+
   const YAML::Node &raw() const { return config_; }
 
 private:

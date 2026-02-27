@@ -1,6 +1,9 @@
 #include "gb_core.h"
 #include "nativecore/ir.h"
 
+#include <algorithm>
+#include <cstring>
+
 namespace nativecore {
 
 GBCore::GBCore() {
@@ -401,6 +404,138 @@ void GBCore::tickSerial(int tcycles) {
       serial_bits_ = 0;
     }
   }
+}
+
+bool GBCore::saveState(std::vector<uint8_t> &out) const {
+  out.push_back(GB_SAVE_STATE_VERSION);
+  cpu_.saveState(out);
+  ppu_.saveState(out);
+  apu_.saveState(out);
+  cart_.saveState(out);
+  for (uint8_t x : wram_) {
+    out.push_back(x);
+  }
+  for (uint8_t x : hram_) {
+    out.push_back(x);
+  }
+  out.push_back(ie_);
+  out.push_back(if_);
+  out.push_back(static_cast<uint8_t>(div_counter_ >> 8));
+  out.push_back(static_cast<uint8_t>(div_counter_));
+  out.push_back(tima_);
+  out.push_back(tma_);
+  out.push_back(tac_);
+  out.push_back(tima_overflow_ ? 1 : 0);
+  out.push_back(static_cast<uint8_t>(tima_overflow_cycles_));
+  out.push_back(prev_timer_bit_ ? 1 : 0);
+  out.push_back(joypad_select_);
+  out.push_back(button_state_);
+  out.push_back(sb_);
+  out.push_back(sc_);
+  out.push_back(static_cast<uint8_t>(serial_timer_ >> 24));
+  out.push_back(static_cast<uint8_t>(serial_timer_ >> 16));
+  out.push_back(static_cast<uint8_t>(serial_timer_ >> 8));
+  out.push_back(static_cast<uint8_t>(serial_timer_));
+  out.push_back(static_cast<uint8_t>(serial_bits_));
+  out.push_back(
+      static_cast<uint8_t>(std::min(serial_output_.size(), size_t(0xFF))));
+  for (size_t i = 0; i < std::min(serial_output_.size(), size_t(0xFF)); i++)
+    out.push_back(static_cast<uint8_t>(serial_output_[i]));
+  out.push_back(dma_active_ ? 1 : 0);
+  out.push_back(static_cast<uint8_t>(dma_source_ >> 8));
+  out.push_back(static_cast<uint8_t>(dma_source_));
+  out.push_back(dma_offset_);
+  out.push_back(static_cast<uint8_t>(dma_delay_));
+  out.push_back(static_cast<uint8_t>(frame_cycles_ >> 24));
+  out.push_back(static_cast<uint8_t>(frame_cycles_ >> 16));
+  out.push_back(static_cast<uint8_t>(frame_cycles_ >> 8));
+  out.push_back(static_cast<uint8_t>(frame_cycles_));
+  return true;
+}
+
+namespace {
+bool readU8(const uint8_t *&p, const uint8_t *end, uint8_t &v) {
+  if (p + 1 > end)
+    return false;
+  v = *p++;
+  return true;
+}
+bool readU32(const uint8_t *&p, const uint8_t *end, uint32_t &v) {
+  if (p + 4 > end)
+    return false;
+  v = static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+      (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+  p += 4;
+  return true;
+}
+} // namespace
+
+bool GBCore::loadState(const uint8_t *data, size_t size) {
+  const uint8_t *p = data;
+  const uint8_t *end = data + size;
+  if (p == end)
+    return false;
+  uint8_t ver = *p++;
+  if (ver != GB_SAVE_STATE_VERSION)
+    return false;
+  if (!cpu_.loadState(p, end) || !ppu_.loadState(p, end) ||
+      !apu_.loadState(p, end) || !cart_.loadState(p, end))
+    return false;
+  if (p + wram_.size() + hram_.size() > end)
+    return false;
+  std::memcpy(wram_.data(), p, wram_.size());
+  p += wram_.size();
+  std::memcpy(hram_.data(), p, hram_.size());
+  p += hram_.size();
+  if (!readU8(p, end, ie_) || !readU8(p, end, if_))
+    return false;
+  uint8_t hi, lo;
+  if (!readU8(p, end, hi) || !readU8(p, end, lo))
+    return false;
+  div_counter_ = (static_cast<uint16_t>(hi) << 8) | lo;
+  if (!readU8(p, end, tima_) || !readU8(p, end, tma_) || !readU8(p, end, tac_))
+    return false;
+  uint8_t b;
+  if (!readU8(p, end, b))
+    return false;
+  tima_overflow_ = (b != 0);
+  if (!readU8(p, end, b))
+    return false;
+  tima_overflow_cycles_ = b;
+  if (!readU8(p, end, b))
+    return false;
+  prev_timer_bit_ = (b != 0);
+  if (!readU8(p, end, joypad_select_) || !readU8(p, end, button_state_) ||
+      !readU8(p, end, sb_) || !readU8(p, end, sc_))
+    return false;
+  uint32_t u32;
+  if (!readU32(p, end, u32))
+    return false;
+  serial_timer_ = static_cast<int>(u32);
+  if (!readU8(p, end, b))
+    return false;
+  serial_bits_ = b;
+  if (!readU8(p, end, b))
+    return false;
+  size_t ser_len = b;
+  if (p + ser_len > end)
+    return false;
+  serial_output_.assign(reinterpret_cast<const char *>(p),
+                        reinterpret_cast<const char *>(p) + ser_len);
+  p += ser_len;
+  if (!readU8(p, end, b))
+    return false;
+  dma_active_ = (b != 0);
+  if (!readU8(p, end, hi) || !readU8(p, end, lo))
+    return false;
+  dma_source_ = (static_cast<uint16_t>(hi) << 8) | lo;
+  if (!readU8(p, end, dma_offset_) || !readU8(p, end, b))
+    return false;
+  dma_delay_ = b;
+  if (!readU32(p, end, u32))
+    return false;
+  frame_cycles_ = static_cast<int>(u32);
+  return true;
 }
 
 } // namespace nativecore

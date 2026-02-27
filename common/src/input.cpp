@@ -1,5 +1,6 @@
 #include "nativecore/input.h"
 
+#include <SDL3/SDL_gamepad.h>
 #include <algorithm>
 
 namespace nativecore {
@@ -218,6 +219,8 @@ InputProfile InputManager::defaultGameBoyProfile() {
       {"Left", p, SDL_SCANCODE_LEFT, SDL_GAMEPAD_BUTTON_DPAD_LEFT},
       {"Up", p, SDL_SCANCODE_UP, SDL_GAMEPAD_BUTTON_DPAD_UP},
       {"Down", p, SDL_SCANCODE_DOWN, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
+      {"Quick Save", p, SDL_SCANCODE_F5, SDL_GAMEPAD_BUTTON_INVALID},
+      {"Quick Load", p, SDL_SCANCODE_F7, SDL_GAMEPAD_BUTTON_INVALID},
   };
   return profile;
 }

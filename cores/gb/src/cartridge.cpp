@@ -430,4 +430,92 @@ void Cartridge::writeMBC5(uint16_t addr, uint8_t val) {
   }
 }
 
+namespace {
+void writeU8(std::vector<uint8_t> &out, uint8_t v) { out.push_back(v); }
+void writeU16(std::vector<uint8_t> &out, uint16_t v) {
+  out.push_back(static_cast<uint8_t>(v));
+  out.push_back(static_cast<uint8_t>(v >> 8));
+}
+void writeU32(std::vector<uint8_t> &out, uint32_t v) {
+  out.push_back(static_cast<uint8_t>(v));
+  out.push_back(static_cast<uint8_t>(v >> 8));
+  out.push_back(static_cast<uint8_t>(v >> 16));
+  out.push_back(static_cast<uint8_t>(v >> 24));
+}
+void writeBool(std::vector<uint8_t> &out, bool v) { out.push_back(v ? 1 : 0); }
+bool readU8(const uint8_t *&p, const uint8_t *end, uint8_t &v) {
+  if (p + 1 > end)
+    return false;
+  v = *p++;
+  return true;
+}
+bool readU16(const uint8_t *&p, const uint8_t *end, uint16_t &v) {
+  if (p + 2 > end)
+    return false;
+  v = static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+  p += 2;
+  return true;
+}
+bool readU32(const uint8_t *&p, const uint8_t *end, uint32_t &v) {
+  if (p + 4 > end)
+    return false;
+  v = static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+      (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+  p += 4;
+  return true;
+}
+bool readBool(const uint8_t *&p, const uint8_t *end, bool &v) {
+  uint8_t b;
+  if (!readU8(p, end, b))
+    return false;
+  v = (b != 0);
+  return true;
+}
+} // namespace
+
+void Cartridge::saveState(std::vector<uint8_t> &out) const {
+  writeU32(out, static_cast<uint32_t>(ram_.size()));
+  for (uint8_t x : ram_)
+    out.push_back(x);
+  writeU8(out, rom_bank_);
+  writeU8(out, ram_bank_);
+  writeBool(out, ram_enabled_);
+  writeU8(out, mbc1_bank_lo_);
+  writeU8(out, mbc1_bank_hi_);
+  writeBool(out, mbc1_mode_);
+  writeU8(out, rtc_register_);
+  writeBool(out, rtc_latched_);
+  writeU8(out, rtc_latch_data_);
+  writeU8(out, rtc_s_);
+  writeU8(out, rtc_m_);
+  writeU8(out, rtc_h_);
+  writeU16(out, rtc_dl_);
+  writeU8(out, rtc_dh_);
+  writeU16(out, mbc5_rom_bank_);
+}
+
+bool Cartridge::loadState(const uint8_t *&data, const uint8_t *end) {
+  uint32_t ram_size;
+  if (!readU32(data, end, ram_size) || data + ram_size > end)
+    return false;
+  if (ram_size != ram_.size())
+    return false; // ROM must be same
+  for (uint32_t i = 0; i < ram_size; i++) {
+    uint8_t b;
+    if (!readU8(data, end, b))
+      return false;
+    ram_[i] = b;
+  }
+  if (!readU8(data, end, rom_bank_) || !readU8(data, end, ram_bank_) ||
+      !readBool(data, end, ram_enabled_) || !readU8(data, end, mbc1_bank_lo_) ||
+      !readU8(data, end, mbc1_bank_hi_) || !readBool(data, end, mbc1_mode_) ||
+      !readU8(data, end, rtc_register_) || !readBool(data, end, rtc_latched_) ||
+      !readU8(data, end, rtc_latch_data_) || !readU8(data, end, rtc_s_) ||
+      !readU8(data, end, rtc_m_) || !readU8(data, end, rtc_h_) ||
+      !readU16(data, end, rtc_dl_) || !readU8(data, end, rtc_dh_) ||
+      !readU16(data, end, mbc5_rom_bank_))
+    return false;
+  return true;
+}
+
 } // namespace nativecore

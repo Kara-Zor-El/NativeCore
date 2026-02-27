@@ -14,6 +14,7 @@ struct PlatformInfo {
 
 PlatformInfo getPlatformInfo();
 
+std::string getDataDirectory();
 std::string getConfigDirectory(const std::string &app_name);
 
 } // namespace nativecore::runtime

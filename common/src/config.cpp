@@ -70,6 +70,7 @@ void ConfigManager::setDefaults() {
   config_["input"]["bindings"] = YAML::Node(YAML::NodeType::Map);
   config_["performance"]["fps_limit"] = 60.0;
   config_["performance"]["uncapped"] = false;
+  config_["save_states"]["max_count"] = 10;
   config_["gb"]["color_palette"] = 0;
 }
 
@@ -193,6 +194,16 @@ bool ConfigManager::uncappedFps() const {
 
 void ConfigManager::setUncappedFps(bool uncapped) {
   config_["performance"]["uncapped"] = uncapped;
+  autoSave();
+}
+
+int ConfigManager::maxSaveStates() const {
+  int v = getValue(config_["save_states"]["max_count"], 10);
+  return v > 0 ? v : 10;
+}
+
+void ConfigManager::setMaxSaveStates(int max) {
+  config_["save_states"]["max_count"] = std::max(1, max);
   autoSave();
 }
 

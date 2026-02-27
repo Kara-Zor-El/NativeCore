@@ -6,6 +6,7 @@ add_library(nativecore_common STATIC
   src/ir.cpp
   src/recompiler.cpp
   src/core.cpp
+  src/save_state.cpp
   src/settings_overlay.cpp
   src/themes/theme_default.cpp
   src/themes/theme_game_boy.cpp

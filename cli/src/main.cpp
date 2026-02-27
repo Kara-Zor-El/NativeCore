@@ -106,7 +106,7 @@ int main(int argc, char *argv[]) {
 
   if (run_mode) {
     nativecore::runtime::App app;
-    auto error = app.init(std::move(core));
+    auto error = app.init(std::move(core), "", rom_path);
     if (!error.empty()) {
       std::cerr << "Error: " << error << "\n";
       return 1;

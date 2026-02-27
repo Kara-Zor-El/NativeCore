@@ -23,6 +23,8 @@ public:
   static constexpr uint8_t INT_SERIAL = 0x08;
   static constexpr uint8_t INT_JOYPAD = 0x10;
 
+  static constexpr uint8_t GB_SAVE_STATE_VERSION = 1;
+
   GBCore();
   ~GBCore() override = default;
 
@@ -40,6 +42,9 @@ public:
   void clearAudioBuffer() override;
   void consumeAudioSamples(size_t samples) override;
   void setInputState(int controller, uint8_t buttons) override;
+
+  bool saveState(std::vector<uint8_t> &out) const override;
+  bool loadState(const uint8_t *data, size_t size) override;
 
   // Bus interface (called by CPU, PPU, etc.)
   uint8_t busRead(uint16_t addr) const;

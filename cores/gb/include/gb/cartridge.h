@@ -39,6 +39,9 @@ public:
   const std::vector<uint8_t> &ram() const { return ram_; }
   void setRAM(const std::vector<uint8_t> &data) { ram_ = data; }
 
+  void saveState(std::vector<uint8_t> &out) const;
+  bool loadState(const uint8_t *&data, const uint8_t *end);
+
 private:
   CartridgeHeader header_;
   std::vector<uint8_t> rom_;

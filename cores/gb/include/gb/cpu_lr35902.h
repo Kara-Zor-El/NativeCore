@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 namespace nativecore {
 
@@ -32,6 +33,9 @@ public:
   bool halted() const { return halted_; }
   bool ime() const { return ime_; }
   bool stopped() const { return stopped_; }
+
+  void saveState(std::vector<uint8_t> &out) const;
+  bool loadState(const uint8_t *&data, const uint8_t *end);
 
 private:
   GBCore *bus_ = nullptr;

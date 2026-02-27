@@ -1,6 +1,7 @@
 #include "apu.h"
 
 #include <cstring>
+#include <vector>
 
 namespace nativecore {
 
@@ -637,5 +638,186 @@ void APU::consumeSamples(size_t count) {
 }
 
 void APU::clearBuffer() { buffer_.clear(); }
+
+namespace {
+void writeU8(std::vector<uint8_t> &out, uint8_t v) { out.push_back(v); }
+void writeU16(std::vector<uint8_t> &out, uint16_t v) {
+  out.push_back(static_cast<uint8_t>(v));
+  out.push_back(static_cast<uint8_t>(v >> 8));
+}
+void writeU32(std::vector<uint8_t> &out, uint32_t v) {
+  out.push_back(static_cast<uint8_t>(v));
+  out.push_back(static_cast<uint8_t>(v >> 8));
+  out.push_back(static_cast<uint8_t>(v >> 16));
+  out.push_back(static_cast<uint8_t>(v >> 24));
+}
+void writeBool(std::vector<uint8_t> &out, bool v) { out.push_back(v ? 1 : 0); }
+bool readU8(const uint8_t *&p, const uint8_t *end, uint8_t &v) {
+  if (p + 1 > end)
+    return false;
+  v = *p++;
+  return true;
+}
+bool readU16(const uint8_t *&p, const uint8_t *end, uint16_t &v) {
+  if (p + 2 > end)
+    return false;
+  v = static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+  p += 2;
+  return true;
+}
+bool readU32(const uint8_t *&p, const uint8_t *end, uint32_t &v) {
+  if (p + 4 > end)
+    return false;
+  v = static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+      (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+  p += 4;
+  return true;
+}
+bool readBool(const uint8_t *&p, const uint8_t *end, bool &v) {
+  uint8_t b;
+  if (!readU8(p, end, b))
+    return false;
+  v = (b != 0);
+  return true;
+}
+void saveSquare(std::vector<uint8_t> &out, const SquareChannel &c) {
+  writeBool(out, c.enabled);
+  writeBool(out, c.dac_enabled);
+  writeU8(out, c.duty);
+  writeU8(out, c.duty_pos);
+  writeU8(out, c.length_counter);
+  writeBool(out, c.length_enabled);
+  writeU8(out, c.volume);
+  writeU8(out, c.volume_init);
+  writeBool(out, c.envelope_add);
+  writeU8(out, c.envelope_period);
+  writeU8(out, c.envelope_timer);
+  writeU16(out, c.frequency);
+  writeU32(out, static_cast<uint32_t>(c.timer));
+  writeBool(out, c.trigger);
+  writeBool(out, c.has_sweep);
+  writeU8(out, c.sweep_period);
+  writeU8(out, c.sweep_shift);
+  writeBool(out, c.sweep_negate);
+  writeU8(out, c.sweep_timer);
+  writeBool(out, c.sweep_enabled);
+  writeU16(out, c.sweep_shadow);
+  writeBool(out, c.sweep_negate_used);
+}
+bool loadSquare(const uint8_t *&p, const uint8_t *end, SquareChannel &c) {
+  if (!readBool(p, end, c.enabled) || !readBool(p, end, c.dac_enabled) ||
+      !readU8(p, end, c.duty) || !readU8(p, end, c.duty_pos) ||
+      !readU8(p, end, c.length_counter) ||
+      !readBool(p, end, c.length_enabled) || !readU8(p, end, c.volume) ||
+      !readU8(p, end, c.volume_init) || !readBool(p, end, c.envelope_add) ||
+      !readU8(p, end, c.envelope_period) || !readU8(p, end, c.envelope_timer) ||
+      !readU16(p, end, c.frequency))
+    return false;
+  uint32_t u;
+  if (!readU32(p, end, u))
+    return false;
+  c.timer = static_cast<int>(u);
+  if (!readBool(p, end, c.trigger) || !readBool(p, end, c.has_sweep) ||
+      !readU8(p, end, c.sweep_period) || !readU8(p, end, c.sweep_shift) ||
+      !readBool(p, end, c.sweep_negate) || !readU8(p, end, c.sweep_timer) ||
+      !readBool(p, end, c.sweep_enabled) || !readU16(p, end, c.sweep_shadow) ||
+      !readBool(p, end, c.sweep_negate_used))
+    return false;
+  return true;
+}
+void saveWave(std::vector<uint8_t> &out, const WaveChannel &c) {
+  writeBool(out, c.enabled);
+  writeBool(out, c.dac_enabled);
+  writeU16(out, c.length_counter);
+  writeBool(out, c.length_enabled);
+  writeU8(out, c.volume_code);
+  writeU16(out, c.frequency);
+  writeU32(out, static_cast<uint32_t>(c.timer));
+  writeU8(out, c.position);
+  writeU8(out, c.sample_buffer);
+  for (uint8_t x : c.wave_ram)
+    out.push_back(x);
+}
+bool loadWave(const uint8_t *&p, const uint8_t *end, WaveChannel &c) {
+  if (!readBool(p, end, c.enabled) || !readBool(p, end, c.dac_enabled) ||
+      !readU16(p, end, c.length_counter) ||
+      !readBool(p, end, c.length_enabled) || !readU8(p, end, c.volume_code) ||
+      !readU16(p, end, c.frequency))
+    return false;
+  uint32_t u;
+  if (!readU32(p, end, u))
+    return false;
+  c.timer = static_cast<int>(u);
+  if (!readU8(p, end, c.position) || !readU8(p, end, c.sample_buffer))
+    return false;
+  if (p + c.wave_ram.size() > end)
+    return false;
+  std::memcpy(c.wave_ram.data(), p, c.wave_ram.size());
+  p += c.wave_ram.size();
+  return true;
+}
+void saveNoise(std::vector<uint8_t> &out, const NoiseChannel &c) {
+  writeBool(out, c.enabled);
+  writeBool(out, c.dac_enabled);
+  writeU8(out, c.length_counter);
+  writeBool(out, c.length_enabled);
+  writeU8(out, c.volume);
+  writeU8(out, c.volume_init);
+  writeBool(out, c.envelope_add);
+  writeU8(out, c.envelope_period);
+  writeU8(out, c.envelope_timer);
+  writeU8(out, c.clock_shift);
+  writeBool(out, c.width_mode);
+  writeU8(out, c.divisor_code);
+  writeU32(out, static_cast<uint32_t>(c.timer));
+  writeU16(out, c.lfsr);
+}
+bool loadNoise(const uint8_t *&p, const uint8_t *end, NoiseChannel &c) {
+  if (!readBool(p, end, c.enabled) || !readBool(p, end, c.dac_enabled) ||
+      !readU8(p, end, c.length_counter) ||
+      !readBool(p, end, c.length_enabled) || !readU8(p, end, c.volume) ||
+      !readU8(p, end, c.volume_init) || !readBool(p, end, c.envelope_add) ||
+      !readU8(p, end, c.envelope_period) || !readU8(p, end, c.envelope_timer) ||
+      !readU8(p, end, c.clock_shift) || !readBool(p, end, c.width_mode) ||
+      !readU8(p, end, c.divisor_code))
+    return false;
+  uint32_t u;
+  if (!readU32(p, end, u))
+    return false;
+  c.timer = static_cast<int>(u);
+  return readU16(p, end, c.lfsr);
+}
+} // namespace
+
+void APU::saveState(std::vector<uint8_t> &out) const {
+  writeBool(out, power_);
+  writeU8(out, frame_seq_step_);
+  writeU32(out, static_cast<uint32_t>(frame_seq_timer_));
+  saveSquare(out, ch1_);
+  saveSquare(out, ch2_);
+  saveWave(out, ch3_);
+  saveNoise(out, ch4_);
+  writeU8(out, nr50_);
+  writeU8(out, nr51_);
+  writeU32(out, static_cast<uint32_t>(sample_timer_));
+}
+
+bool APU::loadState(const uint8_t *&data, const uint8_t *end) {
+  if (!readBool(data, end, power_) || !readU8(data, end, frame_seq_step_))
+    return false;
+  uint32_t u;
+  if (!readU32(data, end, u))
+    return false;
+  frame_seq_timer_ = static_cast<int>(u);
+  if (!loadSquare(data, end, ch1_) || !loadSquare(data, end, ch2_) ||
+      !loadWave(data, end, ch3_) || !loadNoise(data, end, ch4_) ||
+      !readU8(data, end, nr50_) || !readU8(data, end, nr51_))
+    return false;
+  if (!readU32(data, end, u))
+    return false;
+  sample_timer_ = static_cast<int>(u);
+  buffer_.clear();
+  return true;
+}
 
 } // namespace nativecore
