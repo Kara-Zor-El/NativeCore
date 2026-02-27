@@ -27,6 +27,14 @@ std::unique_ptr<Core> createGameBoyCore() { return std::make_unique<GBCore>(); }
 
 const SystemInfo &GBCore::systemInfo() const { return sys_info_; }
 
+bool GBCore::supportsCamera() const {
+  return cart_.loaded() && cart_.header().has_camera;
+}
+
+void GBCore::setCameraProvider(CameraProvider *provider) {
+  cart_.setCameraProvider(provider);
+}
+
 bool GBCore::loadROM(const std::vector<uint8_t> &data) {
   if (!cart_.load(data))
     return false;
@@ -89,6 +97,7 @@ void GBCore::tickMCycle() {
   tickTimer(4);
   tickDMA();
   tickSerial(4);
+  cart_.tickCamera(4);
 }
 
 void GBCore::requestInterrupt(uint8_t flag) { if_ |= flag; }

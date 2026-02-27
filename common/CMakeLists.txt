@@ -11,6 +11,7 @@ add_library(nativecore_common STATIC
   src/themes/theme_default.cpp
   src/themes/theme_game_boy.cpp
   src/video.cpp
+  src/camera_provider.cpp
 )
 
 target_include_directories(nativecore_common PUBLIC

@@ -12,6 +12,8 @@
 
 namespace nativecore {
 
+class CameraProvider;
+
 class GBCore : public Core {
 public:
   static constexpr int CPU_CLOCK = 4194304;
@@ -42,6 +44,9 @@ public:
   void clearAudioBuffer() override;
   void consumeAudioSamples(size_t samples) override;
   void setInputState(int controller, uint8_t buttons) override;
+
+  bool supportsCamera() const override;
+  void setCameraProvider(CameraProvider *provider) override;
 
   bool saveState(std::vector<uint8_t> &out) const override;
   bool loadState(const uint8_t *data, size_t size) override;

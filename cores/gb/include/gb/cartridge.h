@@ -1,11 +1,11 @@
 #pragma once
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <vector>
 
 namespace nativecore {
+class CameraProvider;
 
 enum class MBCType {
   None,
@@ -13,6 +13,7 @@ enum class MBCType {
   MBC2,
   MBC3,
   MBC5,
+  PocketCamera,
 };
 
 struct CartridgeHeader {
@@ -22,6 +23,7 @@ struct CartridgeHeader {
   uint32_t ram_size = 0;
   bool has_battery = false;
   bool has_timer = false;
+  bool has_camera = false;
   uint8_t checksum = 0;
 };
 
@@ -38,6 +40,12 @@ public:
 
   const std::vector<uint8_t> &ram() const { return ram_; }
   void setRAM(const std::vector<uint8_t> &data) { ram_ = data; }
+
+  void setCameraProvider(CameraProvider *provider) {
+    camera_provider_ = provider;
+  }
+
+  void tickCamera(int tcycles);
 
   void saveState(std::vector<uint8_t> &out) const;
   bool loadState(const uint8_t *&data, const uint8_t *end);
@@ -67,6 +75,12 @@ private:
   // MBC5
   uint16_t mbc5_rom_bank_ = 1;
 
+  // Pocket Camera
+  CameraProvider *camera_provider_ = nullptr;
+  uint8_t cam_regs_[0x36]{};
+  bool cam_capturing_ = false;
+  int cam_clocks_left_ = 0;
+
   void parseHeader();
 
   uint8_t readNone(uint16_t addr) const;
@@ -83,6 +97,10 @@ private:
 
   uint8_t readMBC5(uint16_t addr) const;
   void writeMBC5(uint16_t addr, uint8_t val);
+
+  uint8_t readPocketCamera(uint16_t addr) const;
+  void writePocketCamera(uint16_t addr, uint8_t val);
+  void performCameraCapture();
 };
 
 } // namespace nativecore

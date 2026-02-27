@@ -6,7 +6,6 @@
 #include <imgui.h>
 
 #include <cstdlib>
-#include <fstream>
 #include <string>
 
 namespace nativecore::runtime {
@@ -22,7 +21,8 @@ std::string App::init(std::unique_ptr<Core> core,
   if (!core_)
     return std::string("Core is null");
 
-  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD))
+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD |
+                SDL_INIT_CAMERA))
     return std::string("Failed to initialize SDL: ") + SDL_GetError();
 
   const auto &sys = core_->systemInfo();
@@ -39,7 +39,7 @@ std::string App::init(std::unique_ptr<Core> core,
     save_state_mgr_.setGame(sys.name, rom_path_);
 
   // Initialize video
-  std::string title = "recomp - " + sys.name;
+  std::string title = "NativeCore - " + sys.name;
   if (!video_.init(title, sys.screen_width, sys.screen_height,
                    config_.windowScale())) {
     const char *err = SDL_GetError();
@@ -79,6 +79,13 @@ std::string App::init(std::unique_ptr<Core> core,
   // Initialize overlay
   overlay_.init(video_);
 
+  // Open camera device only for games whose core reports camera usage
+  if (core_->supportsCamera()) {
+    if (camera_.open()) {
+      core_->setCameraProvider(&camera_);
+    }
+  }
+
   running_ = true;
   return std::string();
 }
@@ -99,6 +106,7 @@ void App::shutdown() {
   overlay_.shutdown();
   audio_.shutdown();
   input_.shutdown();
+  camera_.close();
   video_.shutdown();
   SDL_Quit();
   core_.reset();

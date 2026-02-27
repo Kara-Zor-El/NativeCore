@@ -5,19 +5,19 @@
  * - 0x08, 0x09
  * - MBC6 (0x20)
  * - MBC7 (0x22) (contains accelerometer + rumble)
- * - Pocket Camera (0xFC/0x1F)
  * - Bandai TAMA5 (0xFD)
  * - Hudson HuC-3 (0xFE)
  * - Hudson HuC-1 (0xFF)
  * Partially supported cartridges:
  * - MBC3 - no real time clock support yet, no proper latching
  * - MBC5 - no rumble support yet
+ * - Pocket Camera (0xFC) - camera via host webcam
  * - No battery save/load (whilst is tracked, no saving or loading from disk)
  */
 #include "cartridge.h"
-
-#include <algorithm>
+#include "nativecore/camera_provider.h"
 #include <cstring>
+#include <iostream>
 
 namespace nativecore {
 
@@ -37,6 +37,17 @@ bool Cartridge::load(const std::vector<uint8_t> &data) {
   ram_.assign(header_.ram_size, 0);
 
   reset();
+
+  std::cout << "rom size: " << header_.rom_size << std::endl;
+  std::cout << "rom type: 0x" << static_cast<int>(rom_[0x0149]) << std::endl;
+  std::cout << "ram size: " << header_.ram_size << std::endl;
+  std::cout << "mbc type: 0x" << static_cast<int>(header_.mbc_type)
+            << std::endl;
+  std::cout << "checksum: 0x" << static_cast<int>(header_.checksum)
+            << std::endl;
+  std::cout << "title: " << header_.title << std::endl;
+  std::cout << std::endl;
+
   return true;
 }
 
@@ -115,6 +126,11 @@ void Cartridge::parseHeader() {
     header_.mbc_type = MBCType::MBC5;
     header_.has_battery = true;
     break;
+  case 0xFC:
+    header_.mbc_type = MBCType::PocketCamera;
+    header_.has_battery = true;
+    header_.has_camera = true;
+    break;
   default:
     header_.mbc_type = MBCType::None;
     break;
@@ -153,6 +169,10 @@ void Cartridge::parseHeader() {
     header_.ram_size = 512; // 512 bytes
   }
 
+  if (header_.mbc_type == MBCType::PocketCamera) {
+    header_.ram_size = 131072; // Pocket Camera
+  }
+
   // Header checksum (0x014D)
   header_.checksum = rom_[0x014D];
 }
@@ -173,6 +193,9 @@ void Cartridge::reset() {
   rtc_dl_ = 0;
   rtc_dh_ = 0;
   mbc5_rom_bank_ = 1;
+  std::memset(cam_regs_, 0, sizeof(cam_regs_));
+  cam_capturing_ = false;
+  cam_clocks_left_ = 0;
 }
 
 uint8_t Cartridge::read(uint16_t addr) const {
@@ -187,6 +210,8 @@ uint8_t Cartridge::read(uint16_t addr) const {
     return readMBC3(addr);
   case MBCType::MBC5:
     return readMBC5(addr);
+  case MBCType::PocketCamera:
+    return readPocketCamera(addr);
   }
   return 0xFF;
 }
@@ -207,6 +232,9 @@ void Cartridge::write(uint16_t addr, uint8_t val) {
     break;
   case MBCType::MBC5:
     writeMBC5(addr, val);
+    break;
+  case MBCType::PocketCamera:
+    writePocketCamera(addr, val);
     break;
   }
 }
@@ -430,6 +458,159 @@ void Cartridge::writeMBC5(uint16_t addr, uint8_t val) {
   }
 }
 
+// Pocket Camera (Game Boy Camera)
+uint8_t Cartridge::readPocketCamera(uint16_t addr) const {
+  if (addr < 0x4000) {
+    return rom_[addr];
+  }
+  if (addr < 0x8000) {
+    uint32_t offset = (mbc5_rom_bank_ * 0x4000) + (addr - 0x4000);
+    return rom_[offset % rom_.size()];
+  }
+  if (addr >= 0xA000 && addr < 0xC000) {
+    // Bank >= 0x10: camera registers
+    if (ram_bank_ >= 0x10) {
+      uint16_t reg = (addr - 0xA000) & 0x7F; // registers mirror every 0x80
+      if (reg == 0x00) {
+        // A000 bit 0: 1 = capture in progress, 0 = finished.
+        return cam_capturing_ ? 0x01 : 0x00;
+      }
+      // All other camera registers are write-only and return 0
+      return 0x00;
+    }
+
+    // Normal RAM bank, but while a capture is
+    // in progress, RAM must read back as 0x00.
+    if (ram_.empty())
+      return 0xFF;
+    if (cam_capturing_)
+      return 0x00;
+
+    uint32_t offset = (ram_bank_ * 0x2000) + (addr - 0xA000);
+    return ram_[offset % ram_.size()];
+  }
+  return 0xFF;
+}
+
+void Cartridge::writePocketCamera(uint16_t addr, uint8_t val) {
+  if (addr < 0x2000) {
+    ram_enabled_ = (val & 0x0F) == 0x0A;
+  } else if (addr < 0x3000) {
+    mbc5_rom_bank_ = (mbc5_rom_bank_ & 0x100) | val;
+  } else if (addr < 0x4000) {
+    mbc5_rom_bank_ = (mbc5_rom_bank_ & 0xFF) | ((val & 0x01) << 8);
+  } else if (addr < 0x6000) {
+    ram_bank_ = val & 0x1F; // banks 0x00-0x0F = RAM, 0x10 = camera regs
+  } else if (addr >= 0xA000 && addr < 0xC000) {
+    // Bank >= 0x10: camera registers
+    if (ram_bank_ >= 0x10) {
+      uint16_t reg = (addr - 0xA000) & 0x7F;
+      if (reg < 0x36)
+        cam_regs_[reg] = val;
+      // Writing bit 0 to register 0 triggers a capture
+      if (reg == 0x00 && (val & 0x01)) {
+        performCameraCapture();
+      }
+      return;
+    }
+    // Normal RAM bank. Writes require RAM to be enabled and are ignored
+    // while a capture is in progress.
+    if (!ram_enabled_ || ram_.empty() || cam_capturing_)
+      return;
+    uint32_t offset = (ram_bank_ * 0x2000) + (addr - 0xA000);
+    ram_[offset % ram_.size()] = val;
+  }
+}
+
+void Cartridge::performCameraCapture() {
+  // The Game Boy Camera captures a 128x112 image and stores it as
+  // 2bpp tile data starting at RAM bank 0, offset 0x0100.
+  // The image uses a 4x4 dithering matrix from camera registers A006-A035.
+
+  static constexpr int CAM_W = 128;
+  static constexpr int CAM_H = 112;
+
+  // Get a grayscale frame from the host webcam
+  uint8_t grayscale[CAM_W * CAM_H];
+  bool have_frame = false;
+
+  if (camera_provider_) {
+    have_frame = camera_provider_->captureFrame(grayscale, CAM_W, CAM_H);
+  }
+
+  if (!have_frame) {
+    // No camera available — fill with mid-gray (will produce a
+    // dithered pattern, not just blank).
+    std::memset(grayscale, 128, sizeof(grayscale));
+  }
+
+  // Build the 3-threshold dithering matrix from registers A006-A035.
+  // 48 bytes = 3 thresholds x 16 entries (4x4 matrix in tile order).
+  uint8_t threshold[3][16];
+  for (int t = 0; t < 3; t++) {
+    for (int i = 0; i < 16; i++) {
+      threshold[t][i] = cam_regs_[0x06 + t * 16 + i];
+    }
+  }
+
+  // Convert grayscale image into 2bpp tile data.
+  // The image is 128x112 = 16x14 tiles = 224 tiles.
+  // Each tile is 8x8 pixels, stored as 16 bytes (2 bytes per line).
+  // Output goes to RAM bank 0 at offset 0x0100.
+
+  if (ram_.size() < 0x2000)
+    return; // safety check
+
+  size_t ram_offset = 0x0100;
+
+  for (int tile_y = 0; tile_y < 14; tile_y++) {
+    for (int tile_x = 0; tile_x < 16; tile_x++) {
+      for (int py = 0; py < 8; py++) {
+        uint8_t low_byte = 0;
+        uint8_t high_byte = 0;
+
+        for (int px = 0; px < 8; px++) {
+          int img_x = tile_x * 8 + px;
+          int img_y = tile_y * 8 + py;
+          uint8_t pixel = grayscale[img_y * CAM_W + img_x];
+
+          // Dithering matrix index (4x4 pattern within pixel coords)
+          int dither_idx = (img_y & 3) * 4 + (img_x & 3);
+
+          // Apply 3-threshold dithering to get 2-bit color
+          // (0=lightest, 3=darkest)
+          uint8_t color = (pixel < threshold[0][dither_idx]) +
+                          (pixel < threshold[1][dither_idx]) +
+                          (pixel < threshold[2][dither_idx]);
+
+          // Pack into 2bpp tile format
+          int bit_pos = 7 - px;
+          low_byte |= (color & 0x01) << bit_pos;
+          high_byte |= ((color >> 1) & 0x01) << bit_pos;
+        }
+
+        if (ram_offset + 1 < ram_.size()) {
+          ram_[ram_offset++] = low_byte;
+          ram_[ram_offset++] = high_byte;
+        }
+      }
+    }
+  }
+}
+
+void Cartridge::tickCamera(int tcycles) {
+  if (!cam_capturing_)
+    return;
+
+  cam_clocks_left_ -= tcycles;
+  if (cam_clocks_left_ <= 0) {
+    cam_capturing_ = false;
+    cam_clocks_left_ = 0;
+
+    performCameraCapture();
+  }
+}
+
 namespace {
 void writeU8(std::vector<uint8_t> &out, uint8_t v) { out.push_back(v); }
 void writeU16(std::vector<uint8_t> &out, uint16_t v) {
@@ -492,6 +673,11 @@ void Cartridge::saveState(std::vector<uint8_t> &out) const {
   writeU16(out, rtc_dl_);
   writeU8(out, rtc_dh_);
   writeU16(out, mbc5_rom_bank_);
+  // Pocket Camera state
+  for (size_t i = 0; i < 0x36; i++)
+    writeU8(out, cam_regs_[i]);
+  writeBool(out, cam_capturing_);
+  writeU32(out, static_cast<uint32_t>(cam_clocks_left_));
 }
 
 bool Cartridge::loadState(const uint8_t *&data, const uint8_t *end) {
@@ -515,6 +701,17 @@ bool Cartridge::loadState(const uint8_t *&data, const uint8_t *end) {
       !readU16(data, end, rtc_dl_) || !readU8(data, end, rtc_dh_) ||
       !readU16(data, end, mbc5_rom_bank_))
     return false;
+  // Pocket Camera state
+  for (size_t i = 0; i < 0x36; i++) {
+    if (!readU8(data, end, cam_regs_[i]))
+      return false;
+  }
+  if (!readBool(data, end, cam_capturing_))
+    return false;
+  uint32_t clocks;
+  if (!readU32(data, end, clocks))
+    return false;
+  cam_clocks_left_ = static_cast<int>(clocks);
   return true;
 }
 

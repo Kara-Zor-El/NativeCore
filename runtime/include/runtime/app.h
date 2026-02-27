@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nativecore/audio.h"
+#include "nativecore/camera_provider.h"
 #include "nativecore/config.h"
 #include "nativecore/core.h"
 #include "nativecore/frame_limiter.h"
@@ -35,6 +36,7 @@ private:
   ConfigManager config_;
   SaveStateManager save_state_mgr_;
   SettingsOverlay overlay_;
+  CameraProvider camera_;
 
   bool running_ = false;
   std::string config_path_;
