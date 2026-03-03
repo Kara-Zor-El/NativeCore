@@ -25,6 +25,7 @@
           pkgs.libGL
           pkgs.mesa
           pkgs.libxkbcommon
+          pkgs.treefmt
         ];
         shellHook = pkgs: let
           libs = with pkgs; [

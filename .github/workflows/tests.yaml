@@ -13,7 +13,7 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - name: Format Check
-        run: nix develop --command bash -c "task format"
+        run: nix develop --command bash -c "task format -- --fail-on-change"
 
   build-and-test:
     strategy:

@@ -21,4 +21,4 @@ tasks:
   format:
     desc: Formats the project
     cmds:
-      - find . -path ./build -prune -o \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' -o -name '*.c' \) -print | xargs clang-format -i -style=file
+      - treefmt {{.CLI_ARGS}}
