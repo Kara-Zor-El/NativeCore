@@ -17,7 +17,6 @@
 #include "cartridge.h"
 #include "nativecore/camera_provider.h"
 #include <cstring>
-#include <iostream>
 
 namespace nativecore {
 
@@ -38,15 +37,15 @@ bool Cartridge::load(const std::vector<uint8_t> &data) {
 
   reset();
 
-  std::cout << "rom size: " << header_.rom_size << std::endl;
-  std::cout << "rom type: 0x" << static_cast<int>(rom_[0x0149]) << std::endl;
-  std::cout << "ram size: " << header_.ram_size << std::endl;
-  std::cout << "mbc type: 0x" << static_cast<int>(header_.mbc_type)
-            << std::endl;
-  std::cout << "checksum: 0x" << static_cast<int>(header_.checksum)
-            << std::endl;
-  std::cout << "title: " << header_.title << std::endl;
-  std::cout << std::endl;
+  // std::cout << "rom size: " << header_.rom_size << std::endl;
+  // std::cout << "rom type: 0x" << static_cast<int>(rom_[0x0149]) << std::endl;
+  // std::cout << "ram size: " << header_.ram_size << std::endl;
+  // std::cout << "mbc type: 0x" << static_cast<int>(header_.mbc_type)
+  //           << std::endl;
+  // std::cout << "checksum: 0x" << static_cast<int>(header_.checksum)
+  //           << std::endl;
+  // std::cout << "title: " << header_.title << std::endl;
+  // std::cout << std::endl;
 
   return true;
 }

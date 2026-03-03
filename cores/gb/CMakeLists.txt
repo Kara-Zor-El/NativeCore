@@ -14,3 +14,5 @@ target_include_directories(nativecore_gb PUBLIC
 )
 
 target_link_libraries(nativecore_gb PUBLIC nativecore_common)
+
+add_subdirectory(tests)

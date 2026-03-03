@@ -28,5 +28,6 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - name: Build Check
         run: nix develop --command bash -c "task release"
-      # - name: Test
-      #   run: nix develop --command bash -c "task test"
+      - name: Test Game Boy
+        run: nix develop --command bash -c "task test" # note, not all tests will pass as some aren't intended for the gameboy
+        continue-on-error: true
