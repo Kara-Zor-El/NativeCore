@@ -180,6 +180,13 @@ static void runTestDirectory(const std::string &dir, const std::string &suite,
     return;
   }
 
+  // NOTE: Not all roms within the mooneye test suite are made for this CPU
+  // revision
+  std::vector<std::string> blacklisted_roms = {
+      "boot_div-S.gb",    "boot_div-dmg0.gb",  "boot_div2-S.gb",
+      "boot_hwio-S.gb",   "boot_hwio-dmg0.gb", "boot_regs-dmg0.gb",
+      "boot_regs-mgb.gb", "boot_regs-sgb.gb",  "boot_regs-sgb2.gb"};
+
   std::vector<std::string> rom_files;
   for (auto &entry : fs::recursive_directory_iterator(dir)) {
     if (entry.is_regular_file()) {
@@ -193,6 +200,16 @@ static void runTestDirectory(const std::string &dir, const std::string &suite,
 
   for (auto &rom_path : rom_files) {
     auto rel_path = fs::relative(rom_path, dir).string();
+
+    bool blacklisted =
+        std::any_of(blacklisted_roms.begin(), blacklisted_roms.end(),
+                    [&rel_path](const std::string &b) {
+                      return rel_path.find(b) != std::string::npos;
+                    });
+
+    if (blacklisted)
+      continue;
+
     auto test_name = suite + "/" + rel_path;
     total++;
 
