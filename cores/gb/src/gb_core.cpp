@@ -27,6 +27,27 @@ std::unique_ptr<Core> createGameBoyCore() { return std::make_unique<GBCore>(); }
 
 const SystemInfo &GBCore::systemInfo() const { return sys_info_; }
 
+uint8_t GBCore::peekRegister(int id) const {
+  switch (static_cast<GBReg>(id)) {
+  case GBReg::B:
+    return cpu_.b();
+  case GBReg::C:
+    return cpu_.c();
+  case GBReg::D:
+    return cpu_.d();
+  case GBReg::E:
+    return cpu_.e();
+  case GBReg::H:
+    return cpu_.h();
+  case GBReg::L:
+    return cpu_.l();
+  case GBReg::A:
+    return cpu_.a();
+  case GBReg::F:
+    return cpu_.f();
+  }
+}
+
 bool GBCore::supportsCamera() const {
   return cart_.loaded() && cart_.header().has_camera;
 }

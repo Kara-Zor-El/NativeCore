@@ -138,7 +138,7 @@ void WaveChannel::reset() {
   timer = 0;
   position = 0;
   sample_buffer = 0;
-  wave_ram.fill(0);
+  // starting shouldn't clear the wave ram
 }
 
 void WaveChannel::triggerChannel() {

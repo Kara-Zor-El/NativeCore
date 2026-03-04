@@ -17,6 +17,7 @@
 #include "cartridge.h"
 #include "nativecore/camera_provider.h"
 #include <cstring>
+#include <unordered_map>
 
 namespace nativecore {
 
@@ -136,17 +137,31 @@ void Cartridge::parseHeader() {
   }
 
   // ROM size (0x0148)
-  uint8_t rom_code = rom_[0x0148];
-  header_.rom_size = 32768 << rom_code;
+  // this works better than the previous approach as previously it only
+  // accounted for officially supported sizes
+  const std::unordered_map<uint8_t, uint32_t> rom_sizes = {
+      {0x00, 32768},   // 32KiB
+      {0x01, 65536},   // 64KiB
+      {0x02, 131072},  // 128KiB
+      {0x03, 262144},  // 256KiB
+      {0x04, 524288},  // 512KiB
+      {0x05, 1048576}, // 1MiB
+      {0x06, 2097152}, // 2MiB
+      {0x07, 4194304}, // 4MiB
+      {0x08, 8388608}, // 8MiB
+      {0x52, 1153433}, // 1.1MiB
+      {0x53, 1258291}, // 1.2MiB
+      {0x54, 1572864}  // 1.5MiB
+  };
+  header_.rom_size = rom_sizes.at(rom_[0x0148]);
 
   // RAM size (0x0149)
   switch (rom_[0x0149]) {
   case 0x00:
-    header_.ram_size = 0;
+    header_.ram_size = 0; // No RAM
     break;
   case 0x01:
-    header_.ram_size = 2048; // 2KB
-    break;
+    break; // Unused
   case 0x02:
     header_.ram_size = 8192; // 8KB
     break;

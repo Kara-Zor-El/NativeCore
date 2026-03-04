@@ -4,6 +4,7 @@
 #include "cartridge.h"
 #include "cpu_lr35902.h"
 #include "nativecore/core.h"
+#include "nativecore/testable_core.h"
 #include "ppu.h"
 
 #include <array>
@@ -14,7 +15,9 @@ namespace nativecore {
 
 class CameraProvider;
 
-class GBCore : public Core {
+enum class GBReg { B = 0, C = 1, D = 2, E = 3, H = 4, L = 5, A = 6, F = 7 };
+
+class GBCore : public Core, public TestableCore {
 public:
   static constexpr int CPU_CLOCK = 4194304;
   static constexpr int CYCLES_PER_FRAME = 70224;
@@ -63,6 +66,10 @@ public:
 
   // Serial output capture (for test ROMs)
   const std::string &serialOutput() const { return serial_output_; }
+
+  // TestableCore interface
+  const std::string &debugOutput() const override { return serial_output_; }
+  uint8_t peekRegister(int id) const override;
 
   // Direct component access (for tests/debug)
   CPU &cpu() { return cpu_; }

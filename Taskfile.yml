@@ -8,11 +8,11 @@ tasks:
       - cmake --build build --parallel
 
   test:
-    desc: Builds the project and runs tests
+    desc: Builds the project and runs all tests.
     cmds:
       - cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
       - cmake --build build --parallel
-      - ctest --test-dir build --output-on-failure {{.CLI_ARGS}}
+      - ctest --test-dir build --output-on-failure --parallel {{.CLI_ARGS}}
 
   clean:
     desc: Cleans the project
