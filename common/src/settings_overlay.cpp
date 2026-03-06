@@ -7,32 +7,32 @@
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlgpu3.h>
 
+#include <controllerimage.h>
+
+static const unsigned char controllerImageData[] = {
+#embed "controllerimage-standard.bin"
+};
+static constexpr std::size_t controllerImageSize = sizeof(controllerImageData);
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_surface.h>
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <iostream>
 #include <string>
 #include <unordered_set>
 
 namespace nativecore {
 
-static SDL_GPUTexture *CreateTextureFromPNG(SDL_GPUDevice *device,
-                                            const char *path, int &out_w,
-                                            int &out_h) {
-  out_w = 0;
-  out_h = 0;
-  if (!device || !path)
-    return nullptr;
-
-  SDL_Surface *surface = SDL_LoadPNG(path);
-  if (!surface)
+static SDL_GPUTexture *CreateGPUTextureFromSurface(SDL_GPUDevice *device,
+                                                   SDL_Surface *surface) {
+  if (!device || !surface)
     return nullptr;
 
   const int w = surface->w;
   const int h = surface->h;
   if (w <= 0 || h <= 0) {
-    SDL_DestroySurface(surface);
     return nullptr;
   }
 
@@ -47,7 +47,6 @@ static SDL_GPUTexture *CreateTextureFromPNG(SDL_GPUDevice *device,
 
   SDL_GPUTexture *texture = SDL_CreateGPUTexture(device, &tex_info);
   if (!texture) {
-    SDL_DestroySurface(surface);
     return nullptr;
   }
 
@@ -58,7 +57,6 @@ static SDL_GPUTexture *CreateTextureFromPNG(SDL_GPUDevice *device,
       SDL_CreateGPUTransferBuffer(device, &tb_info);
   if (!transfer) {
     SDL_ReleaseGPUTexture(device, texture);
-    SDL_DestroySurface(surface);
     return nullptr;
   }
 
@@ -66,24 +64,33 @@ static SDL_GPUTexture *CreateTextureFromPNG(SDL_GPUDevice *device,
   if (!mapped) {
     SDL_ReleaseGPUTransferBuffer(device, transfer);
     SDL_ReleaseGPUTexture(device, texture);
-    SDL_DestroySurface(surface);
     return nullptr;
   }
 
   auto *dst = static_cast<uint8_t *>(mapped);
-  auto *src = static_cast<uint8_t *>(surface->pixels);
-  const int row_bytes = w * 4;
-  for (int y = 0; y < h; ++y) {
-    std::memcpy(dst + y * row_bytes, src + y * surface->pitch, row_bytes);
+
+  SDL_Surface *converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+  if (!converted) {
+    SDL_UnmapGPUTransferBuffer(device, transfer);
+    SDL_ReleaseGPUTransferBuffer(device, transfer);
+    SDL_ReleaseGPUTexture(device, texture);
+    return nullptr;
   }
 
+  auto *src = static_cast<uint8_t *>(converted->pixels);
+  const int row_bytes = w * 4;
+
+  for (int y = 0; y < h; ++y) {
+    std::memcpy(dst + y * row_bytes, src + y * converted->pitch, row_bytes);
+  }
+
+  SDL_DestroySurface(converted);
   SDL_UnmapGPUTransferBuffer(device, transfer);
 
   SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(device);
   if (!cmd) {
     SDL_ReleaseGPUTransferBuffer(device, transfer);
     SDL_ReleaseGPUTexture(device, texture);
-    SDL_DestroySurface(surface);
     return nullptr;
   }
 
@@ -104,10 +111,29 @@ static SDL_GPUTexture *CreateTextureFromPNG(SDL_GPUDevice *device,
   SDL_SubmitGPUCommandBuffer(cmd);
 
   SDL_ReleaseGPUTransferBuffer(device, transfer);
-  SDL_DestroySurface(surface);
 
-  out_w = w;
-  out_h = h;
+  return texture;
+}
+
+static SDL_GPUTexture *CreateTextureFromPNG(SDL_GPUDevice *device,
+                                            const char *path, int &out_w,
+                                            int &out_h) {
+  out_w = 0;
+  out_h = 0;
+  if (!device || !path)
+    return nullptr;
+
+  SDL_Surface *surface = SDL_LoadPNG(path);
+  if (!surface)
+    return nullptr;
+
+  SDL_GPUTexture *texture = CreateGPUTextureFromSurface(device, surface);
+  if (texture) {
+    out_w = surface->w;
+    out_h = surface->h;
+  }
+
+  SDL_DestroySurface(surface);
   return texture;
 }
 
@@ -134,6 +160,11 @@ bool SettingsOverlay::init(VideoManager &video) {
 
   gpu_device_ = video.gpuDevice();
 
+  ControllerImage_Init();
+  if (!ControllerImage_AddData(controllerImageData, controllerImageSize)) {
+    std::cerr << "Failed to load embedded controller image data" << std::endl;
+  }
+
   initialized_ = true;
   return true;
 }
@@ -149,6 +180,14 @@ void SettingsOverlay::shutdown() {
       preview_textures_.clear();
       gpu_device_ = nullptr;
     }
+
+    for (auto *tex : frame_textures_) {
+      SDL_ReleaseGPUTexture(gpu_device_, tex);
+    }
+    frame_textures_.clear();
+
+    ControllerImage_Quit();
+
     ImGui_ImplSDLGPU3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
@@ -279,6 +318,11 @@ void SettingsOverlay::render(AudioManager &audio, InputManager &input,
     SDL_EndGPURenderPass(render_pass);
   }
   SDL_SubmitGPUCommandBuffer(cmd);
+
+  for (auto *tex : frame_textures_) {
+    SDL_ReleaseGPUTexture(gpu_device_, tex);
+  }
+  frame_textures_.clear();
 }
 
 void SettingsOverlay::renderAudioPanel(AudioManager &audio,
@@ -354,10 +398,32 @@ void SettingsOverlay::renderInputPanel(InputManager &input,
                             70.0f * current_scale_);
     ImGui::TableHeadersRow();
 
+    auto sdl_gamepad = input.gamepad(profile.bindings[0].controller_index);
+    ControllerImage_Device *device =
+        ControllerImage_CreateGamepadDevice(sdl_gamepad);
+    if (!device) {
+      device = ControllerImage_CreateGamepadDeviceByIdString("xbox360");
+    }
+
     for (size_t i = 0; i < profile.bindings.size(); i++) {
       const InputBinding &b = profile.bindings[i];
+      SDL_GPUTexture *controller_button_texture = nullptr;
+
       if (b.controller_index != 0)
         continue;
+
+      if (device) {
+        auto *button_surface =
+            ControllerImage_CreateSurfaceForButton(device, b.pad_button, 32);
+        if (button_surface) {
+          controller_button_texture =
+              CreateGPUTextureFromSurface(gpu_device_, button_surface);
+          if (controller_button_texture) {
+            frame_textures_.push_back(controller_button_texture);
+          }
+          SDL_DestroySurface(button_surface);
+        }
+      }
 
       ImGui::TableNextRow();
       ImGui::PushID(static_cast<int>(i));
@@ -369,7 +435,12 @@ void SettingsOverlay::renderInputPanel(InputManager &input,
       ImGui::Text("%s", keyName(b.key));
 
       ImGui::TableNextColumn();
-      ImGui::Text("%s", gamepadButtonName(b.pad_button));
+      if (controller_button_texture) {
+        ImGui::Image(reinterpret_cast<ImTextureID>(controller_button_texture),
+                     ImVec2(32, 32));
+      } else {
+        ImGui::Text("%s", gamepadButtonName(b.pad_button));
+      }
 
       ImGui::TableNextColumn();
       bool is_rebinding_this =
@@ -383,6 +454,9 @@ void SettingsOverlay::renderInputPanel(InputManager &input,
         ImGui::EndDisabled();
 
       ImGui::PopID();
+    }
+    if (device) {
+      ControllerImage_DestroyDevice(device);
     }
     ImGui::EndTable();
   }

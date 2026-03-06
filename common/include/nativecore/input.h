@@ -62,6 +62,12 @@ public:
     rebind_callback_ = std::move(cb);
   }
 
+  SDL_Gamepad *gamepad(int index) const {
+    if (index < 0 || index >= static_cast<int>(gamepads_.size()))
+      return nullptr;
+    return gamepads_[index];
+  }
+
   static InputProfile defaultGameBoyProfile();
 
 private:

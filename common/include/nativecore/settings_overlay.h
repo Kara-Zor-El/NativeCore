@@ -45,6 +45,7 @@ private:
 
   SDL_GPUDevice *gpu_device_ = nullptr;
   std::unordered_map<std::string, PreviewTexture> preview_textures_;
+  std::vector<SDL_GPUTexture *> frame_textures_;
 
   int active_tab_ = 0;
 
