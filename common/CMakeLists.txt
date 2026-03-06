@@ -19,6 +19,11 @@ target_include_directories(nativecore_common PUBLIC
   ${LLVM_INCLUDE_DIRS}
 )
 
+target_compile_options(nativecore_common PRIVATE
+  --embed-dir=${CONTROLLERIMAGE_BIN_DIR}
+  -Wno-c23-extensions
+)
+
 target_compile_definitions(nativecore_common PUBLIC ${LLVM_DEFINITIONS})
 
 llvm_map_components_to_libnames(LLVM_LIBS
@@ -34,5 +39,6 @@ target_link_libraries(nativecore_common PUBLIC
   SDL3::SDL3
   imgui
   yaml-cpp
+  ControllerImage
   ${LLVM_LIBS}
 )

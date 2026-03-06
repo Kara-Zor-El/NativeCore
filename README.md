@@ -26,7 +26,7 @@ Every output application includes a shared common library providing:
 
 - **CMake 3.20+**
 - **LLVM 21+**
-- **C++17 compiler** (Only tested with Clang)
+- **C++23 compiler** (Note: Only tested with Clang)
 - **Task (taskfile)** (Optional, but recommended)
 - **Nix** (Optional but makes building much easier)
 
