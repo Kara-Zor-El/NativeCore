@@ -274,6 +274,13 @@ void APU::reset() {
 
   ch1_.reset();
   ch1_.has_sweep = true;
+  // Post-DMG-boot-ROM state: ch1 was triggered for the startup sound
+  ch1_.dac_enabled = true;
+  ch1_.enabled = true;
+  ch1_.duty = 2;         // NR11 = $BF: duty 2 (50%)
+  ch1_.volume_init = 15; // NR12 = $F3: volume 15, add=false (down), period 3
+  ch1_.envelope_add = false;
+  ch1_.envelope_period = 3;
   ch2_.reset();
   ch3_.reset();
   ch4_.reset();

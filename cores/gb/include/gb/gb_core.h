@@ -64,6 +64,12 @@ public:
   uint8_t interruptFlags() const { return if_; }
   void setInterruptFlags(uint8_t val) { if_ = val | 0xE0; }
 
+  // OAM corruption bug: called by CPU when a 16-bit IDU operation acts on an
+  // address in $FE00–$FEFF while the PPU is in OAM-Search (mode 2).
+  // type: 0=write, 1=read, 2=read+write (INC/DEC rp = write only)
+  enum OAMBugType : uint8_t { Write, Read, ReadWrite };
+  void triggerOAMBug(OAMBugType type);
+
   // Serial output capture (for test ROMs)
   const std::string &serialOutput() const { return serial_output_; }
 
@@ -99,6 +105,8 @@ private:
   uint8_t tac_ = 0;
   bool tima_overflow_ = false;
   int tima_overflow_cycles_ = 0;
+  bool tima_just_reloaded_ =
+      false; // true when TIMA was reloaded this M-cycle (writes ignored)
   bool prev_timer_bit_ = false;
 
   // Joypad
@@ -113,15 +121,18 @@ private:
   std::string serial_output_;
 
   // OAM DMA
-  bool dma_active_ = false;
+  bool dma_active_ = false;    // DMA transfer in progress (OAM blocked)
+  bool dma_requested_ = false; // DMA was written but delay hasn't elapsed
   uint16_t dma_source_ = 0;
   uint8_t dma_offset_ = 0;
   int dma_delay_ = 0;
+  uint8_t dma_last_written_ = 0xFF; // last value written to 0xFF46
 
   int frame_cycles_ = 0;
 
   void tickTimer(int tcycles);
   void tickDMA();
+  uint8_t dmaRead(uint16_t addr) const;
   void tickSerial(int tcycles);
 
   uint8_t readIO(uint16_t addr) const;

@@ -78,18 +78,20 @@ void GBCore::reset() {
   tac_ = 0;
   tima_overflow_ = false;
   tima_overflow_cycles_ = 0;
+  tima_just_reloaded_ = false;
   prev_timer_bit_ = false;
   joypad_select_ = 0x30;
   button_state_ = 0xFF;
   sb_ = 0;
   sc_ = 0;
-  serial_timer_ = 0;
   serial_bits_ = 0;
   serial_output_.clear();
   dma_active_ = false;
+  dma_requested_ = false;
   dma_source_ = 0;
   dma_offset_ = 0;
   dma_delay_ = 0;
+  dma_last_written_ = 0xFF;
   frame_cycles_ = 0;
 }
 
@@ -145,6 +147,11 @@ uint8_t GBCore::busRead(uint16_t addr) const {
   if (addr < 0xFEA0) {
     if (dma_active_)
       return 0xFF;
+    // OAM read during mode 2 (OAM scan, while locked) triggers read
+    // corruption bug
+    if (ppu_.oamLocked() && ppu_.mode() == PPU::Mode::OAMScan) {
+      ppu_.oamBugCorruptRead(ppu_.oamRow());
+    }
     return ppu_.readOAM(addr - 0xFE00);
   }
   if (addr < 0xFF00) {
@@ -183,6 +190,11 @@ void GBCore::busWrite(uint16_t addr, uint8_t val) {
   if (addr < 0xFEA0) {
     if (dma_active_)
       return;
+    // OAM write during mode 2 (OAM scan, while locked) triggers write
+    // corruption bug
+    if (ppu_.oamLocked() && ppu_.mode() == PPU::Mode::OAMScan) {
+      ppu_.oamBugCorruptWrite(ppu_.oamRow());
+    }
     ppu_.writeOAM(addr - 0xFE00, val);
     return;
   }
@@ -263,7 +275,7 @@ uint8_t GBCore::readIO(uint16_t addr) const {
   case 0xFF0F:
     return if_ | 0xE0;
   case 0xFF46:
-    return 0xFF; // DMA (write-only, reading returns last bus value)
+    return dma_last_written_;
 
   default:
     if (addr >= 0xFF10 && addr <= 0xFF3F) {
@@ -287,7 +299,6 @@ void GBCore::writeIO(uint16_t addr, uint8_t val) {
   case 0xFF02: // SC
     sc_ = val;
     if (val & 0x80) {
-      serial_timer_ = 0;
       serial_bits_ = 0;
     }
     break;
@@ -306,19 +317,21 @@ void GBCore::writeIO(uint16_t addr, uint8_t val) {
     break;
   }
   case 0xFF05: // TIMA
-    if (!tima_overflow_) {
-      tima_ = val;
-    }
-    if (tima_overflow_ && tima_overflow_cycles_ < 4) {
-      // Writing to TIMA during the delay period cancels the overflow
+    if (tima_just_reloaded_) {
+      // Write on the same M-cycle as TIMA reload is ignored; TMA value sticks.
+    } else if (tima_overflow_ && tima_overflow_cycles_ < 4) {
+      // Writing to TIMA during the reload delay cancels the overflow
       tima_ = val;
       tima_overflow_ = false;
+    } else if (!tima_overflow_) {
+      tima_ = val;
     }
     break;
   case 0xFF06: // TMA
     tma_ = val;
-    if (tima_overflow_ && tima_overflow_cycles_ >= 4) {
-      // If TIMA was just reloaded from TMA, update it
+    // If we're in the reload window (overflow pending or just reloaded this
+    // M-cycle), TIMA is also updated to the new TMA value.
+    if (tima_overflow_ || tima_just_reloaded_) {
       tima_ = val;
     }
     break;
@@ -340,9 +353,11 @@ void GBCore::writeIO(uint16_t addr, uint8_t val) {
     if_ = val | 0xE0;
     break;
   case 0xFF46: { // OAM DMA
+    dma_last_written_ = val;
     dma_source_ = static_cast<uint16_t>(val) << 8;
-    dma_active_ = true;
+    dma_requested_ = true;
     dma_offset_ = 0;
+    // 2 M-cycles before transfer begins (OAM accessible for 1 M-cycle)
     dma_delay_ = 2;
     break;
   }
@@ -367,13 +382,35 @@ bool GBCore::timerBitSelected() const {
 }
 
 void GBCore::tickTimer(int tcycles) {
-  for (int i = 0; i < tcycles; i++) {
-    bool old_bit = timerBitSelected();
-    div_counter_++;
-    bool new_bit = timerBitSelected();
+  // Clear the "just reloaded" flag at the start of each new M-cycle batch.
+  // This flag guards against writes to TIMA on the same M-cycle as the reload.
+  tima_just_reloaded_ = false;
 
-    // Falling edge detection
-    if (old_bit && !new_bit) {
+  for (int i = 0; i < tcycles; i++) {
+    // Advance the overflow delay BEFORE incrementing div this cycle.
+    // This ensures the reload fires exactly 4 T-cycles after the overflow.
+    if (tima_overflow_) {
+      tima_overflow_cycles_++;
+      if (tima_overflow_cycles_ == 4) {
+        tima_ = tma_;
+        requestInterrupt(INT_TIMER);
+        tima_overflow_ = false;
+        tima_just_reloaded_ = true;
+      }
+    }
+
+    bool old_timer_bit = timerBitSelected();
+    // Serial clock: internal clock uses bit 8 of div_counter_ (512 T period =
+    // 8192 Hz) Track the falling edge of bit 8 to clock each serial bit.
+    bool old_serial_bit = (div_counter_ >> 8) & 1;
+
+    div_counter_++;
+
+    bool new_timer_bit = timerBitSelected();
+    bool new_serial_bit = (div_counter_ >> 8) & 1;
+
+    // Timer: falling edge detection
+    if (old_timer_bit && !new_timer_bit) {
       tima_++;
       if (tima_ == 0) {
         tima_overflow_ = true;
@@ -381,12 +418,15 @@ void GBCore::tickTimer(int tcycles) {
       }
     }
 
-    if (tima_overflow_) {
-      tima_overflow_cycles_++;
-      if (tima_overflow_cycles_ == 4) {
-        tima_ = tma_;
-        requestInterrupt(INT_TIMER);
-        tima_overflow_ = false;
+    // Serial: falling edge of bit 8 clocks one bit (internal clock mode only)
+    if (old_serial_bit && !new_serial_bit && (sc_ & 0x81) == 0x81) {
+      serial_bits_++;
+      if (serial_bits_ >= 8) {
+        serial_output_ += static_cast<char>(sb_);
+        sb_ = 0xFF; // No connected device
+        sc_ &= ~0x80;
+        requestInterrupt(INT_SERIAL);
+        serial_bits_ = 0;
       }
     }
   }
@@ -394,16 +434,39 @@ void GBCore::tickTimer(int tcycles) {
 
 // OAM DMA
 
-void GBCore::tickDMA() {
-  if (!dma_active_)
-    return;
+// DMA reads bypass OAM/VRAM access restrictions (DMA hardware can access
+// anything). On DMG, the DMA controller treats addresses $E000 and above as
+// WRAM echo. This means $FE00-$FEFF mirrors $DE00-$DEFF (WRAM), not OAM, and
+// $FF00-$FFFF mirrors $DF00-$DFFF (WRAM), not IO registers.
+uint8_t GBCore::dmaRead(uint16_t addr) const {
+  if (addr < 0x8000) {
+    return cart_.read(addr);
+  }
+  if (addr < 0xA000) {
+    return ppu_.readVRAMDirect(addr); // direct VRAM access, no PPU mode check
+  }
+  if (addr < 0xC000) {
+    return cart_.read(addr);
+  }
+  // $C000-$DFFF = WRAM, $E000 and above = WRAM echo (including $FE00+ and
+  // $FF00+)
+  return wram_[addr & 0x1FFF];
+}
 
-  if (dma_delay_ > 0) {
+void GBCore::tickDMA() {
+  if (dma_requested_) {
     dma_delay_--;
+    if (dma_delay_ == 0) {
+      dma_requested_ = false;
+      dma_active_ = true;
+    }
     return;
   }
 
-  uint8_t byte = busRead(dma_source_ + dma_offset_);
+  if (!dma_active_)
+    return;
+
+  uint8_t byte = dmaRead(dma_source_ + dma_offset_);
   ppu_.oamDMAWrite(dma_offset_, byte);
   dma_offset_++;
 
@@ -415,24 +478,24 @@ void GBCore::tickDMA() {
 // Serial
 
 void GBCore::tickSerial(int tcycles) {
-  if (!(sc_ & 0x80))
-    return;
-  if (!(sc_ & 0x01))
-    return; // Only internal clock
+  (void)tcycles; // Serial clock is derived from div_counter_ bit 8, ticked in
+                 // tickTimer
+}
 
-  serial_timer_ += tcycles;
-  // Internal clock: 8192 Hz = 512 T-cycles per bit
-  while (serial_timer_ >= 512) {
-    serial_timer_ -= 512;
-    serial_bits_++;
-    if (serial_bits_ >= 8) {
-      // Transfer complete - capture the byte for test ROMs
-      serial_output_ += static_cast<char>(sb_);
-      sb_ = 0xFF; // No connected device
-      sc_ &= ~0x80;
-      requestInterrupt(INT_SERIAL);
-      serial_bits_ = 0;
-    }
+void GBCore::triggerOAMBug(OAMBugType type) {
+  if (!ppu_.oamLocked() || ppu_.mode() != PPU::Mode::OAMScan)
+    return;
+  int row = ppu_.oamRow();
+  switch (type) {
+  case OAMBugType::Write:
+    ppu_.oamBugCorruptWrite(row);
+    break;
+  case OAMBugType::Read:
+    ppu_.oamBugCorruptRead(row);
+    break;
+  case OAMBugType::ReadWrite:
+    ppu_.oamBugCorruptReadWrite(row);
+    break;
   }
 }
 
@@ -472,10 +535,12 @@ bool GBCore::saveState(std::vector<uint8_t> &out) const {
   for (size_t i = 0; i < std::min(serial_output_.size(), size_t(0xFF)); i++)
     out.push_back(static_cast<uint8_t>(serial_output_[i]));
   out.push_back(dma_active_ ? 1 : 0);
+  out.push_back(dma_requested_ ? 1 : 0);
   out.push_back(static_cast<uint8_t>(dma_source_ >> 8));
   out.push_back(static_cast<uint8_t>(dma_source_));
   out.push_back(dma_offset_);
   out.push_back(static_cast<uint8_t>(dma_delay_));
+  out.push_back(dma_last_written_);
   out.push_back(static_cast<uint8_t>(frame_cycles_ >> 24));
   out.push_back(static_cast<uint8_t>(frame_cycles_ >> 16));
   out.push_back(static_cast<uint8_t>(frame_cycles_ >> 8));
@@ -556,12 +621,17 @@ bool GBCore::loadState(const uint8_t *data, size_t size) {
   if (!readU8(p, end, b))
     return false;
   dma_active_ = (b != 0);
+  if (!readU8(p, end, b))
+    return false;
+  dma_requested_ = (b != 0);
   if (!readU8(p, end, hi) || !readU8(p, end, lo))
     return false;
   dma_source_ = (static_cast<uint16_t>(hi) << 8) | lo;
   if (!readU8(p, end, dma_offset_) || !readU8(p, end, b))
     return false;
   dma_delay_ = b;
+  if (!readU8(p, end, dma_last_written_))
+    return false;
   if (!readU32(p, end, u32))
     return false;
   frame_cycles_ = static_cast<int>(u32);

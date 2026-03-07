@@ -36,6 +36,22 @@ bool Cartridge::load(const std::vector<uint8_t> &data) {
 
   ram_.assign(header_.ram_size, 0);
 
+  // MBC1M detection: 1 MiB multicart ROMs have a Nintendo logo at bank $10.
+  // The logo starts at offset 0x0104 within each bank's header region, so
+  // for bank $10 that's at ROM offset 0x10 * 0x4000 + 0x0104 = 0x40104.
+  mbc1_multicart_ = false;
+  if (header_.mbc_type == MBCType::MBC1 && header_.rom_size == 1048576) {
+    static const uint8_t nintendo_logo[] = {
+        0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B,
+        0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
+    };
+    size_t logo_offset = 0x10 * 0x4000 + 0x0104;
+    if (logo_offset + 16 <= rom_.size()) {
+      mbc1_multicart_ =
+          std::memcmp(rom_.data() + logo_offset, nintendo_logo, 16) == 0;
+    }
+  }
+
   reset();
 
   // std::cout << "rom size: " << header_.rom_size << std::endl;
@@ -281,12 +297,22 @@ void Cartridge::writeNone(uint16_t addr, uint8_t val) {
 
 uint8_t Cartridge::readMBC1(uint16_t addr) const {
   if (addr < 0x4000) {
-    uint32_t bank = mbc1_mode_ ? (mbc1_bank_hi_ << 5) : 0;
+    uint32_t bank = 0;
+    if (mbc1_mode_) {
+      bank = mbc1_multicart_ ? (mbc1_bank_hi_ << 4) : (mbc1_bank_hi_ << 5);
+    }
     uint32_t offset = (bank * 0x4000) + addr;
     return rom_[offset % rom_.size()];
   }
   if (addr < 0x8000) {
-    uint32_t bank = (mbc1_bank_hi_ << 5) | mbc1_bank_lo_;
+    uint32_t bank;
+    if (mbc1_multicart_) {
+      // MBC1M: upper 2-bit register at bits 4-5, lower 4-bit register (bit 4
+      // ignored)
+      bank = (mbc1_bank_hi_ << 4) | (mbc1_bank_lo_ & 0x0F);
+    } else {
+      bank = (mbc1_bank_hi_ << 5) | mbc1_bank_lo_;
+    }
     uint32_t offset = (bank * 0x4000) + (addr - 0x4000);
     return rom_[offset % rom_.size()];
   }
@@ -304,9 +330,16 @@ void Cartridge::writeMBC1(uint16_t addr, uint8_t val) {
   if (addr < 0x2000) {
     ram_enabled_ = (val & 0x0F) == 0x0A;
   } else if (addr < 0x4000) {
-    mbc1_bank_lo_ = val & 0x1F;
-    if (mbc1_bank_lo_ == 0)
-      mbc1_bank_lo_ = 1;
+    if (mbc1_multicart_) {
+      // MBC1M: 00->01 translation uses full 5-bit register value
+      mbc1_bank_lo_ = val & 0x1F;
+      if (mbc1_bank_lo_ == 0)
+        mbc1_bank_lo_ = 1;
+    } else {
+      mbc1_bank_lo_ = val & 0x1F;
+      if (mbc1_bank_lo_ == 0)
+        mbc1_bank_lo_ = 1;
+    }
   } else if (addr < 0x6000) {
     mbc1_bank_hi_ = val & 0x03;
   } else if (addr < 0x8000) {
@@ -331,10 +364,12 @@ uint8_t Cartridge::readMBC2(uint16_t addr) const {
     uint32_t offset = (bank * 0x4000) + (addr - 0x4000);
     return rom_[offset % rom_.size()];
   }
-  if (addr >= 0xA000 && addr < 0xA200) {
+  // MBC2 RAM: A000-A1FF primary, A200-BFFF mirror (only lower 9 bits used)
+  if (addr >= 0xA000 && addr < 0xC000) {
     if (!ram_enabled_)
       return 0xFF;
-    return ram_[(addr - 0xA000) % ram_.size()] | 0xF0;
+    uint16_t ram_idx = (addr - 0xA000) & 0x1FF;
+    return ram_[ram_idx % ram_.size()] | 0xF0;
   }
   return 0xFF;
 }
@@ -348,10 +383,11 @@ void Cartridge::writeMBC2(uint16_t addr, uint8_t val) {
     } else {
       ram_enabled_ = (val & 0x0F) == 0x0A;
     }
-  } else if (addr >= 0xA000 && addr < 0xA200) {
+  } else if (addr >= 0xA000 && addr < 0xC000) {
     if (!ram_enabled_)
       return;
-    ram_[(addr - 0xA000) % ram_.size()] = val & 0x0F;
+    uint16_t ram_idx = (addr - 0xA000) & 0x1FF;
+    ram_[ram_idx % ram_.size()] = val & 0x0F;
   }
 }
 

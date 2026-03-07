@@ -28,6 +28,13 @@ void CPU::write(uint16_t addr, uint8_t val) { bus_->busWrite(addr, val); }
 
 void CPU::tick() { bus_->tickMCycle(); }
 
+// Trigger OAM IDU corruption if addr is in the OAM range ($FE00-$FEFF).
+static void checkOAMBug(GBCore *bus, uint16_t addr, GBCore::OAMBugType type) {
+  if (addr >= 0xFE00 && addr <= 0xFEFF) {
+    bus->triggerOAMBug(type);
+  }
+}
+
 uint8_t CPU::fetch() {
   uint8_t val = read(pc_);
   tick();
@@ -241,21 +248,27 @@ void CPU::addHL(uint16_t val) {
 
 void CPU::push16(uint16_t val) {
   tick(); // internal cycle
+  // First dec SP: if SP was in OAM range, triggers write corruption
+  checkOAMBug(bus_, sp_, GBCore::OAMBugType::Write);
   sp_--;
   write(sp_, (val >> 8) & 0xFF);
   tick();
+  // Second dec SP: if new SP+1 still in OAM range
+  checkOAMBug(bus_, sp_, GBCore::OAMBugType::Write);
   sp_--;
   write(sp_, val & 0xFF);
   tick();
 }
 
 uint16_t CPU::pop16() {
+  // First inc of SP (after read) is the glitched one
   uint8_t lo = read(sp_);
   tick();
+  checkOAMBug(bus_, sp_, GBCore::OAMBugType::Read); // first SP++ IDU
   sp_++;
   uint8_t hi = read(sp_);
   tick();
-  sp_++;
+  sp_++; // second SP++ does NOT trigger bug
   return (static_cast<uint16_t>(hi) << 8) | lo;
 }
 
@@ -292,20 +305,32 @@ bool CPU::handleInterrupts() {
   tick();
   tick();
 
-  // Push PC
+  // Push PC high byte first
   sp_--;
   write(sp_, (pc_ >> 8) & 0xFF);
   tick();
+
+  // Re-sample IE/IF after high byte push. If the high byte was written to
+  // $FFFF (IE register), the pending set may have changed. This is the only
+  // point where cancellation can occur — the low byte push is too late.
+  ie = bus_->interruptEnable();
+  if_reg = bus_->interruptFlags();
+  pending = ie & if_reg & 0x1F;
+
+  // Push PC low byte
   sp_--;
   write(sp_, pc_ & 0xFF);
   tick();
 
-  // Dispatch to vector
-  for (int i = 0; i < 5; i++) {
-    if (pending & (1 << i)) {
-      bus_->setInterruptFlags(if_reg & ~(1 << i));
-      pc_ = 0x0040 + (i * 8);
-      break;
+  if (pending == 0) {
+    pc_ = 0x0000; // Cancelled: no interrupts pending after high-byte push
+  } else {
+    for (int i = 0; i < 5; i++) {
+      if (pending & (1 << i)) {
+        bus_->setInterruptFlags(if_reg & ~(1 << i));
+        pc_ = 0x0040 + (i * 8);
+        break;
+      }
     }
   }
 
@@ -332,7 +357,9 @@ void CPU::step() {
   uint8_t opcode = fetch();
   executeBase(opcode);
 
-  if (was_ime_scheduled) {
+  // Only enable IME if it was still scheduled after the instruction ran.
+  // DI executed after EI clears ime_scheduled_, so we must re-check here.
+  if (was_ime_scheduled && ime_scheduled_) {
     ime_ = true;
     ime_scheduled_ = false;
   }
@@ -353,6 +380,7 @@ void CPU::executeBase(uint8_t opcode) {
     tick();
     break;
   case 0x03: // INC BC
+    checkOAMBug(bus_, bc(), GBCore::OAMBugType::Write);
     setBC(bc() + 1);
     tick();
     break;
@@ -388,6 +416,7 @@ void CPU::executeBase(uint8_t opcode) {
     tick();
     break;
   case 0x0B: // DEC BC
+    checkOAMBug(bus_, bc(), GBCore::OAMBugType::Write);
     setBC(bc() - 1);
     tick();
     break;
@@ -423,6 +452,7 @@ void CPU::executeBase(uint8_t opcode) {
     tick();
     break;
   case 0x13: // INC DE
+    checkOAMBug(bus_, de(), GBCore::OAMBugType::Write);
     setDE(de() + 1);
     tick();
     break;
@@ -456,6 +486,7 @@ void CPU::executeBase(uint8_t opcode) {
     tick();
     break;
   case 0x1B: // DEC DE
+    checkOAMBug(bus_, de(), GBCore::OAMBugType::Write);
     setDE(de() - 1);
     tick();
     break;
@@ -491,11 +522,13 @@ void CPU::executeBase(uint8_t opcode) {
     break;
   }
   case 0x22: // LD (HL+),A
+    checkOAMBug(bus_, hl(), GBCore::OAMBugType::ReadWrite);
     write(hl(), a_);
     tick();
     setHL(hl() + 1);
     break;
   case 0x23: // INC HL
+    checkOAMBug(bus_, hl(), GBCore::OAMBugType::Write);
     setHL(hl() + 1);
     tick();
     break;
@@ -540,11 +573,13 @@ void CPU::executeBase(uint8_t opcode) {
     addHL(hl());
     break;
   case 0x2A: // LD A,(HL+)
+    checkOAMBug(bus_, hl(), GBCore::OAMBugType::ReadWrite);
     a_ = read(hl());
     tick();
     setHL(hl() + 1);
     break;
   case 0x2B: // DEC HL
+    checkOAMBug(bus_, hl(), GBCore::OAMBugType::Write);
     setHL(hl() - 1);
     tick();
     break;
@@ -576,11 +611,13 @@ void CPU::executeBase(uint8_t opcode) {
     sp_ = fetch16();
     break;
   case 0x32: // LD (HL-),A
+    checkOAMBug(bus_, hl(), GBCore::OAMBugType::ReadWrite);
     write(hl(), a_);
     tick();
     setHL(hl() - 1);
     break;
   case 0x33: // INC SP
+    checkOAMBug(bus_, sp_, GBCore::OAMBugType::Write);
     sp_++;
     tick();
     break;
@@ -623,11 +660,13 @@ void CPU::executeBase(uint8_t opcode) {
     addHL(sp_);
     break;
   case 0x3A: // LD A,(HL-)
+    checkOAMBug(bus_, hl(), GBCore::OAMBugType::ReadWrite);
     a_ = read(hl());
     tick();
     setHL(hl() - 1);
     break;
   case 0x3B: // DEC SP
+    checkOAMBug(bus_, sp_, GBCore::OAMBugType::Write);
     sp_--;
     tick();
     break;

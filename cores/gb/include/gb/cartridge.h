@@ -63,6 +63,7 @@ private:
   uint8_t mbc1_bank_lo_ = 1;
   uint8_t mbc1_bank_hi_ = 0;
   bool mbc1_mode_ = false;
+  bool mbc1_multicart_ = false;
 
   // MBC3
   uint8_t rtc_register_ = 0;
