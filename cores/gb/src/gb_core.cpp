@@ -121,6 +121,7 @@ void GBCore::tickMCycle() {
   tickDMA();
   tickSerial(4);
   cart_.tickCamera(4);
+  cart_.tickRTC(4);
 }
 
 void GBCore::requestInterrupt(uint8_t flag) { if_ |= flag; }

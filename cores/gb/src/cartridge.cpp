@@ -9,7 +9,7 @@
  * - Hudson HuC-3 (0xFE)
  * - Hudson HuC-1 (0xFF)
  * Partially supported cartridges:
- * - MBC3 - no real time clock support yet, no proper latching
+ * - MBC3
  * - MBC5 - no rumble support yet
  * - Pocket Camera (0xFC) - camera via host webcam
  * - No battery save/load (whilst is tracked, no saving or loading from disk)
@@ -215,13 +215,19 @@ void Cartridge::reset() {
   mbc1_bank_hi_ = 0;
   mbc1_mode_ = false;
   rtc_register_ = 0;
-  rtc_latched_ = false;
   rtc_latch_data_ = 0xFF;
   rtc_s_ = 0;
   rtc_m_ = 0;
   rtc_h_ = 0;
   rtc_dl_ = 0;
   rtc_dh_ = 0;
+  rtc_latched_ = false;
+  rtc_lat_s_ = 0;
+  rtc_lat_m_ = 0;
+  rtc_lat_h_ = 0;
+  rtc_lat_dl_ = 0;
+  rtc_lat_dh_ = 0;
+  rtc_cycles_ = 0;
   mbc5_rom_bank_ = 1;
   std::memset(cam_regs_, 0, sizeof(cam_regs_));
   cam_capturing_ = false;
@@ -414,15 +420,15 @@ uint8_t Cartridge::readMBC3(uint16_t addr) const {
     // RTC registers
     switch (ram_bank_) {
     case 0x08:
-      return rtc_s_;
+      return rtc_lat_s_;
     case 0x09:
-      return rtc_m_;
+      return rtc_lat_m_;
     case 0x0A:
-      return rtc_h_;
+      return rtc_lat_h_;
     case 0x0B:
-      return rtc_dl_ & 0xFF;
+      return static_cast<uint8_t>(rtc_lat_dl_);
     case 0x0C:
-      return rtc_dh_;
+      return rtc_lat_dh_;
     }
   }
   return 0xFF;
@@ -440,7 +446,12 @@ void Cartridge::writeMBC3(uint16_t addr, uint8_t val) {
   } else if (addr < 0x8000) {
     // Latch clock
     if (rtc_latch_data_ == 0x00 && val == 0x01) {
-      rtc_latched_ = !rtc_latched_;
+      rtc_latched_ = true;
+      rtc_lat_s_ = rtc_s_;
+      rtc_lat_m_ = rtc_m_;
+      rtc_lat_h_ = rtc_h_;
+      rtc_lat_dl_ = rtc_dl_;
+      rtc_lat_dh_ = rtc_dh_;
     }
     rtc_latch_data_ = val;
   } else if (addr >= 0xA000 && addr < 0xC000) {
@@ -451,22 +462,26 @@ void Cartridge::writeMBC3(uint16_t addr, uint8_t val) {
         return;
       uint32_t offset = (ram_bank_ * 0x2000) + (addr - 0xA000);
       ram_[offset % ram_.size()] = val;
+      return;
     }
+    // Writes to RTC registers update the live counters
+    // refresh the latched copy so reads reflect the written value immediately.
     switch (ram_bank_) {
     case 0x08:
-      rtc_s_ = val & 0x3F;
+      rtc_s_ = rtc_lat_s_ = val & 0x3F;
+      rtc_cycles_ = 0;
       break;
     case 0x09:
-      rtc_m_ = val & 0x3F;
+      rtc_m_ = rtc_lat_m_ = val & 0x3F;
       break;
     case 0x0A:
-      rtc_h_ = val & 0x1F;
+      rtc_h_ = rtc_lat_h_ = val & 0x1F;
       break;
     case 0x0B:
-      rtc_dl_ = val;
+      rtc_dl_ = rtc_lat_dl_ = val;
       break;
     case 0x0C:
-      rtc_dh_ = val & 0xC1;
+      rtc_dh_ = rtc_lat_dh_ = val & 0xC1;
       break;
     }
   }
@@ -661,6 +676,75 @@ void Cartridge::tickCamera(int tcycles) {
   }
 }
 
+void Cartridge::tickRTC(int tcycles) {
+  if (!header_.has_timer)
+    return;
+  // Bit 6 of DH is the halt flag
+  if (rtc_dh_ & 0x40)
+    return;
+
+  // GB CPU: 4194304 cycles per second
+  static constexpr int CYCLES_PER_SECOND = 4194304;
+
+  rtc_cycles_ += tcycles;
+  if (rtc_cycles_ < CYCLES_PER_SECOND)
+    return;
+
+  rtc_cycles_ -= CYCLES_PER_SECOND;
+
+  // Each register has two rollover thresholds
+  // Carry threshold: When the incremented value equals this, zero the register
+  // and carry into the next register.
+  // Bit-wrap threshold: When the value exceeds the register's bit width, zero
+  // it without carrying.
+  //
+  // S, M: carry at 60; bit-wrap at >63 (6-bit registers)
+  // H:    carry at 24; bit-wrap at >31 (5-bit register)
+
+  ++rtc_s_;
+  if (rtc_s_ > 63) {
+    rtc_s_ = 0;
+    return;
+  } // bit-wrap, no carry
+  if (rtc_s_ != 60)
+    return;   // normal tick, no carry yet
+  rtc_s_ = 0; // carry into minutes
+
+  ++rtc_m_;
+  if (rtc_m_ > 63) {
+    rtc_m_ = 0;
+    return;
+  }
+  if (rtc_m_ != 60)
+    return;
+  rtc_m_ = 0;
+
+  ++rtc_h_;
+  if (rtc_h_ > 31) {
+    rtc_h_ = 0;
+    return;
+  }
+  if (rtc_h_ != 24)
+    return;
+  rtc_h_ = 0;
+
+  // Increment 9-bit day counter (DL = low 8 bits, DH bit0 = MSB)
+  uint16_t days = (static_cast<uint16_t>(rtc_dh_ & 0x01) << 8) | rtc_dl_;
+  ++days;
+  rtc_dl_ = static_cast<uint8_t>(days & 0xFF);
+  if (days & 0x100) {
+    rtc_dh_ |= 0x01;
+  } else {
+    rtc_dh_ &= ~0x01;
+  }
+  // 9-bit overflow: 0x1FF -> 0x000, set the day carry flag (bit 7 of DH)
+  if (days >= 0x200) {
+    rtc_dl_ = 0;
+    rtc_dh_ &= ~0x01;
+    rtc_dh_ |= 0x80;
+  }
+}
+
 namespace {
 void writeU8(std::vector<uint8_t> &out, uint8_t v) { out.push_back(v); }
 void writeU16(std::vector<uint8_t> &out, uint16_t v) {
@@ -715,13 +799,19 @@ void Cartridge::saveState(std::vector<uint8_t> &out) const {
   writeU8(out, mbc1_bank_hi_);
   writeBool(out, mbc1_mode_);
   writeU8(out, rtc_register_);
-  writeBool(out, rtc_latched_);
   writeU8(out, rtc_latch_data_);
   writeU8(out, rtc_s_);
   writeU8(out, rtc_m_);
   writeU8(out, rtc_h_);
   writeU16(out, rtc_dl_);
   writeU8(out, rtc_dh_);
+  writeBool(out, rtc_latched_);
+  writeU8(out, rtc_lat_s_);
+  writeU8(out, rtc_lat_m_);
+  writeU8(out, rtc_lat_h_);
+  writeU16(out, rtc_lat_dl_);
+  writeU8(out, rtc_lat_dh_);
+  writeU32(out, static_cast<uint32_t>(rtc_cycles_));
   writeU16(out, mbc5_rom_bank_);
   // Pocket Camera state
   for (size_t i = 0; i < 0x36; i++)
@@ -745,12 +835,19 @@ bool Cartridge::loadState(const uint8_t *&data, const uint8_t *end) {
   if (!readU8(data, end, rom_bank_) || !readU8(data, end, ram_bank_) ||
       !readBool(data, end, ram_enabled_) || !readU8(data, end, mbc1_bank_lo_) ||
       !readU8(data, end, mbc1_bank_hi_) || !readBool(data, end, mbc1_mode_) ||
-      !readU8(data, end, rtc_register_) || !readBool(data, end, rtc_latched_) ||
+      !readU8(data, end, rtc_register_) ||
       !readU8(data, end, rtc_latch_data_) || !readU8(data, end, rtc_s_) ||
       !readU8(data, end, rtc_m_) || !readU8(data, end, rtc_h_) ||
       !readU16(data, end, rtc_dl_) || !readU8(data, end, rtc_dh_) ||
+      !readBool(data, end, rtc_latched_) || !readU8(data, end, rtc_lat_s_) ||
+      !readU8(data, end, rtc_lat_m_) || !readU8(data, end, rtc_lat_h_) ||
+      !readU16(data, end, rtc_lat_dl_) || !readU8(data, end, rtc_lat_dh_) ||
       !readU16(data, end, mbc5_rom_bank_))
     return false;
+  uint32_t rtc_cyc;
+  if (!readU32(data, end, rtc_cyc))
+    return false;
+  rtc_cycles_ = static_cast<int>(rtc_cyc);
   // Pocket Camera state
   for (size_t i = 0; i < 0x36; i++) {
     if (!readU8(data, end, cam_regs_[i]))

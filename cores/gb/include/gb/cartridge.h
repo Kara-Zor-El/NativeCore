@@ -46,6 +46,7 @@ public:
   }
 
   void tickCamera(int tcycles);
+  void tickRTC(int tcycles);
 
   void saveState(std::vector<uint8_t> &out) const;
   bool loadState(const uint8_t *&data, const uint8_t *end);
@@ -65,13 +66,21 @@ private:
   bool mbc1_mode_ = false;
   bool mbc1_multicart_ = false;
 
-  // MBC3
+  // MBC3 RTC
   uint8_t rtc_register_ = 0;
-  bool rtc_latched_ = false;
   uint8_t rtc_latch_data_ = 0xFF;
   uint8_t rtc_s_ = 0, rtc_m_ = 0, rtc_h_ = 0;
-  uint16_t rtc_dl_ = 0;
-  uint8_t rtc_dh_ = 0;
+  uint16_t rtc_dl_ = 0; // lower 8 bits of day counter
+  uint8_t rtc_dh_ = 0;  // bit0=day MSB, bit6=halt, bit7=day carry
+
+  // Latched copies written when 0x00->0x01 latch sequence fires
+  bool rtc_latched_ = false;
+  uint8_t rtc_lat_s_ = 0, rtc_lat_m_ = 0, rtc_lat_h_ = 0;
+  uint16_t rtc_lat_dl_ = 0;
+  uint8_t rtc_lat_dh_ = 0;
+
+  // Sub-second cycle accumulator (GB CPU runs at 4194304 Hz)
+  int rtc_cycles_ = 0;
 
   // MBC5
   uint16_t mbc5_rom_bank_ = 1;
