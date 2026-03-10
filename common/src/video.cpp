@@ -15,8 +15,11 @@ bool VideoManager::init(const std::string &title, int game_width,
 
   window_ = SDL_CreateWindow(title.c_str(), game_width_ * scale_,
                              game_height_ * scale_, SDL_WINDOW_RESIZABLE);
-  if (!window_)
+  if (!window_) {
+    const char *err = SDL_GetError();
+    SDL_SetError("SDL_CreateWindow: %s", (err && *err) ? err : "unknown");
     return false;
+  }
 
   gpu_device_ = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV |
                                         SDL_GPU_SHADERFORMAT_MSL |
@@ -24,18 +27,35 @@ bool VideoManager::init(const std::string &title, int game_width,
                                     true, nullptr);
 
   if (!gpu_device_) {
+    const char *err = SDL_GetError();
     SDL_DestroyWindow(window_);
     window_ = nullptr;
+    SDL_SetError("SDL_CreateGPUDevice: %s", (err && *err) ? err : "unknown");
     return false;
   }
 
   if (!SDL_ClaimWindowForGPUDevice(gpu_device_, window_)) {
+    const char *err = SDL_GetError();
     SDL_DestroyGPUDevice(gpu_device_);
     SDL_DestroyWindow(window_);
     gpu_device_ = nullptr;
     window_ = nullptr;
+    SDL_SetError("SDL_ClaimWindowForGPUDevice: %s",
+                 (err && *err) ? err : "unknown");
     return false;
   }
+
+  setVsync(true);
+
+  recreateTexture();
+  if (!game_texture_ || !transfer_buffer_) {
+    const char *err = SDL_GetError();
+    shutdown();
+    SDL_SetError("Failed to create game texture: %s",
+                 (err && *err) ? err : "unknown");
+    return false;
+  }
+  return true;
 }
 
 void VideoManager::shutdown() {
@@ -68,7 +88,8 @@ void VideoManager::recreateTexture() {
 
   SDL_GPUTextureCreateInfo tex_info = {};
   tex_info.type = SDL_GPU_TEXTURETYPE_2D;
-  // Framebuffer is 0xAARRGGBB; in little-endian memory that is B,G,R,A = BGRA.
+  // Framebuffer is 0xAARRGGBB
+  // in little-endian memory that is B,G,R,A = BGRA
   tex_info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
   tex_info.width = static_cast<uint32_t>(game_width_);
   tex_info.height = static_cast<uint32_t>(game_height_);
@@ -124,17 +145,52 @@ void VideoManager::recordDrawToSwapchain(SDL_GPUCommandBuffer *cmd,
                                          uint32_t swapchain_h) {
   if (!cmd || !swapchain_tex)
     return;
+  if (!game_texture_)
+    return;
+
+  uint32_t dest_x = 0;
+  uint32_t dest_y = 0;
+  uint32_t dest_w = swapchain_w;
+  uint32_t dest_h = swapchain_h;
+
+  if (maintain_aspect_ratio_ && swapchain_w > 0 && swapchain_h > 0 &&
+      game_width_ > 0 && game_height_ > 0) {
+    // Scale to fit while preserving aspect ratio
+    const double scale_w = static_cast<double>(swapchain_w) / game_width_;
+    const double scale_h = static_cast<double>(swapchain_h) / game_height_;
+    const double scale = (scale_w < scale_h) ? scale_w : scale_h;
+    dest_w = static_cast<uint32_t>(game_width_ * scale + 0.5);
+    dest_h = static_cast<uint32_t>(game_height_ * scale + 0.5);
+    if (dest_w > swapchain_w)
+      dest_w = swapchain_w;
+    if (dest_h > swapchain_h)
+      dest_h = swapchain_h;
+    dest_x = (swapchain_w - dest_w) / 2;
+    dest_y = (swapchain_h - dest_h) / 2;
+
+    // Clear entire swapchain to black first
+    SDL_GPUColorTargetInfo color_info = {};
+    color_info.texture = swapchain_tex;
+    color_info.load_op = SDL_GPU_LOADOP_CLEAR;
+    color_info.store_op = SDL_GPU_STOREOP_STORE;
+    color_info.clear_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    auto *pass = SDL_BeginGPURenderPass(cmd, &color_info, 1, nullptr);
+    SDL_EndGPURenderPass(pass);
+  }
 
   SDL_GPUBlitInfo blit = {};
   blit.source.texture = game_texture_;
   blit.source.w = static_cast<uint32_t>(game_width_);
   blit.source.h = static_cast<uint32_t>(game_height_);
   blit.destination.texture = swapchain_tex;
-  blit.destination.w = swapchain_w;
-  blit.destination.h = swapchain_h;
+  blit.destination.x = dest_x;
+  blit.destination.y = dest_y;
+  blit.destination.w = dest_w;
+  blit.destination.h = dest_h;
   blit.filter = (scale_mode_ == ScaleMode::Nearest) ? SDL_GPU_FILTER_NEAREST
                                                     : SDL_GPU_FILTER_LINEAR;
-  blit.load_op = SDL_GPU_LOADOP_CLEAR;
+  blit.load_op =
+      maintain_aspect_ratio_ ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
   blit.clear_color = {0.0f, 0.0f, 0.0f, 1.0f};
 
   SDL_BlitGPUTexture(cmd, &blit);
@@ -176,5 +232,18 @@ void VideoManager::setScale(int scale) {
 }
 
 void VideoManager::setScaleMode(ScaleMode mode) { scale_mode_ = mode; }
+
+void VideoManager::setVsync(bool enable) {
+  if (!gpu_device_ || !window_)
+    return;
+  SDL_GPUPresentMode mode =
+      enable ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
+  if (!enable &&
+      !SDL_WindowSupportsGPUPresentMode(gpu_device_, window_, mode)) {
+    return;
+  }
+  SDL_SetGPUSwapchainParameters(gpu_device_, window_,
+                                SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode);
+}
 
 } // namespace nativecore

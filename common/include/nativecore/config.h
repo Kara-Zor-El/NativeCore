@@ -30,14 +30,23 @@ public:
   std::string scaleMode() const;
   void setScaleMode(const std::string &mode);
 
+  bool maintainAspectRatio() const;
+  void setMaintainAspectRatio(bool maintain);
+
   bool fullscreen() const;
   void setFullscreen(bool fullscreen);
+
+  bool vsync() const;
+  void setVsync(bool enable);
 
   double fpsLimit() const;
   void setFpsLimit(double limit);
 
   bool uncappedFps() const;
   void setUncappedFps(bool uncapped);
+
+  int maxSaveStates() const;
+  void setMaxSaveStates(int max);
 
   const YAML::Node &raw() const { return config_; }
 

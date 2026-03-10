@@ -16,6 +16,7 @@ struct IRModule;
 class AudioManager;
 class InputManager;
 class VideoManager;
+class CameraProvider;
 
 struct SystemInfo {
   std::string name;
@@ -51,6 +52,20 @@ public:
   virtual void consumeAudioSamples(size_t samples) = 0;
 
   virtual void setInputState(int controller, uint8_t buttons) = 0;
+
+  // Optional camera support (default: no camera)
+  virtual bool supportsCamera() const { return false; }
+  virtual void setCameraProvider(CameraProvider *provider) { (void)provider; }
+
+  virtual bool saveState(std::vector<uint8_t> &out) const {
+    (void)out;
+    return false;
+  }
+  virtual bool loadState(const uint8_t *data, size_t size) {
+    (void)data;
+    (void)size;
+    return false;
+  }
 };
 
 enum class SystemType {

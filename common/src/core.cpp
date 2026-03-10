@@ -1,4 +1,6 @@
 #include "nativecore/core.h"
+#include <algorithm>
+#include <stdexcept>
 
 namespace nativecore::GameBoy {
 std::unique_ptr<Core> createGameBoyCore();

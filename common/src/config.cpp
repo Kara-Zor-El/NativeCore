@@ -2,6 +2,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <fstream>
 
 namespace nativecore {
@@ -37,6 +38,20 @@ bool ConfigManager::load(const std::string &path) {
   }
 }
 
+bool ConfigManager::save(const std::string &path) const {
+  try {
+    std::ofstream file(path);
+    if (!file.is_open())
+      return false;
+    YAML::Emitter out;
+    out << config_;
+    file << out.c_str();
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
 bool ConfigManager::save() const {
   if (file_path_.empty())
     return false;
@@ -50,9 +65,12 @@ void ConfigManager::setDefaults() {
   config_["video"]["scale"] = 3;
   config_["video"]["fullscreen"] = false;
   config_["video"]["scale_mode"] = "nearest";
+  config_["video"]["maintain_aspect_ratio"] = false;
+  config_["video"]["vsync"] = true;
   config_["input"]["bindings"] = YAML::Node(YAML::NodeType::Map);
   config_["performance"]["fps_limit"] = 60.0;
   config_["performance"]["uncapped"] = false;
+  config_["save_states"]["max_count"] = 10;
   config_["gb"]["color_palette"] = 0;
 }
 
@@ -143,6 +161,24 @@ void ConfigManager::setScaleMode(const std::string &mode) {
   autoSave();
 }
 
+bool ConfigManager::maintainAspectRatio() const {
+  return getValue(config_["video"]["maintain_aspect_ratio"], false);
+}
+
+void ConfigManager::setMaintainAspectRatio(bool maintain) {
+  config_["video"]["maintain_aspect_ratio"] = maintain;
+  autoSave();
+}
+
+bool ConfigManager::vsync() const {
+  return getValue(config_["video"]["vsync"], true);
+}
+
+void ConfigManager::setVsync(bool enable) {
+  config_["video"]["vsync"] = enable;
+  autoSave();
+}
+
 double ConfigManager::fpsLimit() const {
   return getValue(config_["performance"]["fps_limit"], 60.0);
 }
@@ -158,6 +194,16 @@ bool ConfigManager::uncappedFps() const {
 
 void ConfigManager::setUncappedFps(bool uncapped) {
   config_["performance"]["uncapped"] = uncapped;
+  autoSave();
+}
+
+int ConfigManager::maxSaveStates() const {
+  int v = getValue(config_["save_states"]["max_count"], 10);
+  return v > 0 ? v : 10;
+}
+
+void ConfigManager::setMaxSaveStates(int max) {
+  config_["save_states"]["max_count"] = std::max(1, max);
   autoSave();
 }
 

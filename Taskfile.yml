@@ -4,8 +4,15 @@ tasks:
   default:
     desc: Builds the project
     cmds:
+      - cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug {{.CLI_ARGS}}
+      - cmake --build build --parallel
+
+  test:
+    desc: Builds the project and runs all tests.
+    cmds:
       - cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
       - cmake --build build --parallel
+      - ctest --test-dir build --output-on-failure --parallel {{.CLI_ARGS}}
 
   clean:
     desc: Cleans the project
@@ -15,10 +22,10 @@ tasks:
   release:
     desc: Builds the project in release mode
     cmds:
-      - cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - cmake -S . -B build -DCMAKE_BUILD_TYPE=Release {{.CLI_ARGS}}
       - cmake --build build --parallel
 
   format:
     desc: Formats the project
     cmds:
-      - find . -path ./build -prune -o \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' -o -name '*.c' \) -print | xargs clang-format -i -style=file
+      - treefmt {{.CLI_ARGS}}

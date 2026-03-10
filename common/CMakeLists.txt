@@ -1,5 +1,3 @@
-find_package(Slang REQUIRED)
-
 add_library(nativecore_common STATIC
   src/audio.cpp
   src/config.cpp
@@ -8,13 +6,22 @@ add_library(nativecore_common STATIC
   src/ir.cpp
   src/recompiler.cpp
   src/core.cpp
+  src/save_state.cpp
   src/settings_overlay.cpp
+  src/themes/theme_default.cpp
+  src/themes/theme_game_boy.cpp
   src/video.cpp
+  src/camera_provider.cpp
 )
 
 target_include_directories(nativecore_common PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${LLVM_INCLUDE_DIRS}
+)
+
+target_compile_options(nativecore_common PRIVATE
+  --embed-dir=${CONTROLLERIMAGE_BIN_DIR}
+  -Wno-c23-extensions
 )
 
 target_compile_definitions(nativecore_common PUBLIC ${LLVM_DEFINITIONS})
@@ -32,5 +39,6 @@ target_link_libraries(nativecore_common PUBLIC
   SDL3::SDL3
   imgui
   yaml-cpp
+  ControllerImage
   ${LLVM_LIBS}
 )
